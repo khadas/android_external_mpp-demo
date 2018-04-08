@@ -34,15 +34,15 @@
 
 #include <pthread.h>
 
-#define MPI_RESOLUTION_COUNT       		4
-#define MPI_DEC_LOOP_COUNT          		4
-#define MPI_DEC_STREAM_SIZE         		(SZ_4K)
-#define MPI_ENC_IO_COUNT            		(4)
-#define MAX_FILE_NAME_LENGTH        		256
+#define MPI_RESOLUTION_COUNT            4
+#define MPI_DEC_LOOP_COUNT                  4
+#define MPI_DEC_STREAM_SIZE                 (SZ_4K)
+#define MPI_ENC_IO_COUNT                    (4)
+#define MAX_FILE_NAME_LENGTH                256
 
-#define MPI_ENC_TEST_SET_IDR_FRAME	0
-#define MPI_ENC_TEST_SET_OSD			0
-#define MPI_ENC_TEST_SET_ROI			1
+#define MPI_ENC_TEST_SET_IDR_FRAME  0
+#define MPI_ENC_TEST_SET_OSD            0
+#define MPI_ENC_TEST_SET_ROI            1
 
 typedef struct {
     MppCtx          ctx;
@@ -101,7 +101,7 @@ typedef struct {
     MppFrameFormat fmt;
     MppCodingType type;
     RK_U32 num_frames;
-    // resources    
+    // resources
     size_t frame_size;    /* NOTE: packet buffer may overflow */
     size_t packet_size;    /* 32bits for each 16x16 block */
     size_t mdinfo_size;    /* osd idx size range from 16x16 bytes(pixels) to hor_stride*ver_stride(bytes). for general use, 1/8 Y buffer is enough. */
@@ -133,12 +133,12 @@ typedef struct {
     RK_S32          timeout;
 
     RK_U32          nthreads;
-    RK_U32	    nTestType;// 1:decode, 2:encode
+    RK_U32      nTestType;// 1:decode, 2:encode
 } MpiTestCmd;
 
 typedef struct {
-    MpiTestCmd		cmd[MPI_RESOLUTION_COUNT];
-    RK_U32			nResoultions;	
+    MpiTestCmd      cmd[MPI_RESOLUTION_COUNT];
+    RK_U32          nResoultions;
 } MpiTestParam;
 
 static OptionInfo mpi_multi_cmd[] = {
@@ -366,16 +366,16 @@ MPP_RET test_ctx_init(MpiEncTestData **data, MpiTestCmd *cmd)
     }
 
     if (cmd->have_output) {
-		char file_name[MAX_FILE_NAME_LENGTH];
-		int pthread_id = pthread_self();
-		sprintf(file_name, "%s%d", cmd->file_output, pthread_id);
-		mpp_log("===================file_name=%s\n", file_name);
+        char file_name[MAX_FILE_NAME_LENGTH];
+        int pthread_id = pthread_self();
+        sprintf(file_name, "%s%d", cmd->file_output, pthread_id);
+        mpp_log("===================file_name=%s\n", file_name);
 
-	    p->fp_output = fopen(file_name, "w+b");
-	    if (NULL == p->fp_output) {
-	        mpp_err("failed to open output file %s\n", file_name);
-	        ret = MPP_ERR_OPEN_FILE;
-	    }
+        p->fp_output = fopen(file_name, "w+b");
+        if (NULL == p->fp_output) {
+            mpp_err("failed to open output file %s\n", file_name);
+            ret = MPP_ERR_OPEN_FILE;
+        }
     }
 
     // update resource parameter
@@ -1178,11 +1178,11 @@ static int decode_simple(MpiDecLoopData *data)
                         mpp_log("decoder_get_frame get err info:%d discard:%d.\n",
                                 mpp_frame_get_errinfo(frame), mpp_frame_get_discard(frame));
                     }
-					RK_U32 width = mpp_frame_get_width(frame);
+                    RK_U32 width = mpp_frame_get_width(frame);
                     RK_U32 height = mpp_frame_get_height(frame);
                     mpp_log("[%d x %d]decode_get_frame get frame %d\n", width, height, data->frame_count);
-					data->frame_count++;
-			    
+                    data->frame_count++;
+
                     if (data->fp_output && !err_info)
                         dump_mpp_frame_to_file(frame, data->fp_output);
                 }
@@ -1370,9 +1370,9 @@ void* mpi_dec_test_decode(void *cmd_ctx)
     }
 
     if (cmd->have_output) {
-	 char file_name[MAX_FILE_NAME_LENGTH];
-	 int pthread_id = pthread_self();
-	 sprintf(file_name, "%s%u", cmd->file_output, pthread_id);
+        char file_name[MAX_FILE_NAME_LENGTH];
+        int pthread_id = pthread_self();
+        sprintf(file_name, "%s%u", cmd->file_output, pthread_id);
         data.fp_output = fopen(file_name, "w+b");
         if (NULL == data.fp_output) {
             mpp_err("failed to open output file %s\n", file_name);
@@ -1498,21 +1498,21 @@ void* mpi_dec_test_decode(void *cmd_ctx)
     t_total_s = t_s = mpp_time();
     if (cmd->simple) {
         while (!data.eos) {
-             decode_simple(&data);
-		t_e = mpp_time();
-		t_diff = (t_e - t_s);
-		RK_U32 print_condition;
-		if (width <= 640)
-			print_condition = 1 * 1000 * 1000;
-		else
-			print_condition = 3 * 1000 * 1000;
-		if (t_diff >= print_condition) {
-			RK_U32 wink_rate;
-			wink_rate = (data.frame_count - tmp_frame) * 1000 * 1000 / t_diff;
-			printf("==> DEC [%d x %d] rate=%d\n", width, height, wink_rate);
-			t_s = t_e;
-			tmp_frame = data.frame_count;
-		}
+            decode_simple(&data);
+            t_e = mpp_time();
+            t_diff = (t_e - t_s);
+            RK_U32 print_condition;
+            if (width <= 640)
+                print_condition = 1 * 1000 * 1000;
+            else
+                print_condition = 3 * 1000 * 1000;
+            if (t_diff >= print_condition) {
+                RK_U32 wink_rate;
+                wink_rate = (data.frame_count - tmp_frame) * 1000 * 1000 / t_diff;
+                printf("==> DEC [%d x %d] rate=%d\n", width, height, wink_rate);
+                t_s = t_e;
+                tmp_frame = data.frame_count;
+            }
         }
     } else {
         while (!data.eos) {
@@ -1611,72 +1611,72 @@ static RK_S32 mpi_test_parse_options(int argc, char **argv, MpiTestParam* pTestP
 
     /* parse options */
     while (optindex < argc) {
-	 char *delims={ ":" };
-	 RK_S32 index = optindex - 1;
-         opt  = argv[optindex];
-	 opt++;
-	 p=strtok(opt, delims); 
-	 while(p!=NULL){ 
-	     switch (*p) {
-             case 'i':
-                    strncpy(pTestParm->cmd[index].file_input, p+2, MAX_FILE_NAME_LENGTH);
-                    pTestParm->cmd[index].file_input[strlen(p+2)] = '\0';
-                    pTestParm->cmd[index].have_input = 1;
+        char *delims = { ":" };
+        RK_S32 index = optindex - 1;
+        opt  = argv[optindex];
+        opt++;
+        p = strtok(opt, delims);
+        while (p != NULL) {
+            switch (*p) {
+            case 'i':
+                strncpy(pTestParm->cmd[index].file_input, p + 2, MAX_FILE_NAME_LENGTH);
+                pTestParm->cmd[index].file_input[strlen(p + 2)] = '\0';
+                pTestParm->cmd[index].have_input = 1;
                 break;
-             case 'o':
-                    strncpy(pTestParm->cmd[index].file_output, p+2, MAX_FILE_NAME_LENGTH);
-                    pTestParm->cmd[index].file_output[strlen(p+2)] = '\0';
-                    pTestParm->cmd[index].have_output = 1;
+            case 'o':
+                strncpy(pTestParm->cmd[index].file_output, p + 2, MAX_FILE_NAME_LENGTH);
+                pTestParm->cmd[index].file_output[strlen(p + 2)] = '\0';
+                pTestParm->cmd[index].have_output = 1;
                 break;
-             case 'd':
-                    pTestParm->cmd[index].debug = atoi(p+2);
+            case 'd':
+                pTestParm->cmd[index].debug = atoi(p + 2);
                 break;
-             case 'w':
-                    pTestParm->cmd[index].width = atoi(p+2);
+            case 'w':
+                pTestParm->cmd[index].width = atoi(p + 2);
                 break;
-		case 'h':
-                    pTestParm->cmd[index].height= atoi(p+2);
+            case 'h':
+                pTestParm->cmd[index].height = atoi(p + 2);
                 break;
-             case 't':
-                    pTestParm->cmd[index].type = (MppCodingType)atoi(p+2);
-                    err = mpp_check_support_format(MPP_CTX_DEC, pTestParm->cmd[index].type);
-			if (err) {
-	                   mpp_err("invalid input coding type\n");
-	                   goto PARSE_OPINIONS_OUT;
-	             }
+            case 't':
+                pTestParm->cmd[index].type = (MppCodingType)atoi(p + 2);
+                err = mpp_check_support_format(MPP_CTX_DEC, pTestParm->cmd[index].type);
+                if (err) {
+                    mpp_err("invalid input coding type\n");
+                    goto PARSE_OPINIONS_OUT;
+                }
                 break;
-		case 'n':
-                    pTestParm->cmd[index].num_frames = atoi(p+2);
+            case 'n':
+                pTestParm->cmd[index].num_frames = atoi(p + 2);
                 break;
-             case 'x':
-                    pTestParm->cmd[index].timeout = atoi(p+2);
+            case 'x':
+                pTestParm->cmd[index].timeout = atoi(p + 2);
                 break;
-		case 'p':
-                    pTestParm->cmd[index].nthreads = atoi(p+2);
+            case 'p':
+                pTestParm->cmd[index].nthreads = atoi(p + 2);
                 break;
-		case 'f':
-                	pTestParm->cmd[index].format = atoi(p+2);
-                    err = ((pTestParm->cmd[index].format >= MPP_FMT_YUV_BUTT && 
-				pTestParm->cmd[index].format < MPP_FRAME_FMT_RGB) ||
-                           pTestParm->cmd[index].format >= MPP_FMT_RGB_BUTT);
-			if (err) {
-	                    mpp_err("invalid input format %d\n", pTestParm->cmd[index].format);
-	                    goto PARSE_OPINIONS_OUT;
-	             }
+            case 'f':
+                pTestParm->cmd[index].format = atoi(p + 2);
+                err = ((pTestParm->cmd[index].format >= MPP_FMT_YUV_BUTT &&
+                        pTestParm->cmd[index].format < MPP_FRAME_FMT_RGB) ||
+                       pTestParm->cmd[index].format >= MPP_FMT_RGB_BUTT);
+                if (err) {
+                    mpp_err("invalid input format %d\n", pTestParm->cmd[index].format);
+                    goto PARSE_OPINIONS_OUT;
+                }
                 break;
-		case 'q':
-                    pTestParm->cmd[index].nTestType = atoi(p+2);
+            case 'q':
+                pTestParm->cmd[index].nTestType = atoi(p + 2);
                 break;
-             default:
-                	goto PARSE_OPINIONS_OUT;
+            default:
+                goto PARSE_OPINIONS_OUT;
                 break;
             }
-		
-		p=strtok(NULL,delims); 
-	 }
 
-	 pTestParm->nResoultions = optindex;
-	 optindex++;
+            p = strtok(NULL, delims);
+        }
+
+        pTestParm->nResoultions = optindex;
+        optindex++;
     }
 
     err = 0;
@@ -1688,18 +1688,18 @@ PARSE_OPINIONS_OUT:
 static void mpi_test_show_options(MpiTestParam* pTestParm)
 {
     RK_U32 index = 0;
-    for (index=0; index<pTestParm->nResoultions; index++) {
-    	mpp_log("cmd parse result:--%d\n", index+1);
-    	mpp_log("input  file name: %s\n", pTestParm->cmd[index].file_input);
-    	mpp_log("output file name: %s\n", pTestParm->cmd[index].file_output);
-    	mpp_log("width      : %4d\n", pTestParm->cmd[index].width);
-    	mpp_log("height     : %4d\n", pTestParm->cmd[index].height);
-    	mpp_log("type       : %d\n", pTestParm->cmd[index].type);
-    	mpp_log("debug flag : %x\n", pTestParm->cmd[index].debug);
-		mpp_log("threads       : %d\n", pTestParm->cmd[index].nthreads);
-		mpp_log("num frames : %d\n", pTestParm->cmd[index].num_frames);
-		mpp_log("format : %d\n", pTestParm->cmd[index].format);
-		mpp_log("mpp test type : %d\n", pTestParm->cmd[index].nTestType);
+    for (index = 0; index < pTestParm->nResoultions; index++) {
+        mpp_log("cmd parse result:--%d\n", index + 1);
+        mpp_log("input  file name: %s\n", pTestParm->cmd[index].file_input);
+        mpp_log("output file name: %s\n", pTestParm->cmd[index].file_output);
+        mpp_log("width      : %4d\n", pTestParm->cmd[index].width);
+        mpp_log("height     : %4d\n", pTestParm->cmd[index].height);
+        mpp_log("type       : %d\n", pTestParm->cmd[index].type);
+        mpp_log("debug flag : %x\n", pTestParm->cmd[index].debug);
+        mpp_log("threads       : %d\n", pTestParm->cmd[index].nthreads);
+        mpp_log("num frames : %d\n", pTestParm->cmd[index].num_frames);
+        mpp_log("format : %d\n", pTestParm->cmd[index].format);
+        mpp_log("mpp test type : %d\n", pTestParm->cmd[index].nTestType);
     }
 }
 
@@ -1729,8 +1729,8 @@ int main(int argc, char **argv)
 
     mpp_env_set_u32("mpi_debug", pTestParm->cmd[0].debug);
 
-    for (resoultionIndex=0; resoultionIndex<pTestParm->nResoultions; resoultionIndex++) {
-		total_thread += pTestParm->cmd[resoultionIndex].nthreads;
+    for (resoultionIndex = 0; resoultionIndex < pTestParm->nResoultions; resoultionIndex++) {
+        total_thread += pTestParm->cmd[resoultionIndex].nthreads;
     }
 
     pthread_t *handles = malloc(sizeof(pthread_t) * total_thread);
@@ -1742,52 +1742,52 @@ int main(int argc, char **argv)
     RK_U32 **rates = malloc(sizeof(RK_U32 *) * total_thread);
     mpp_assert(rates != NULL);
 
-    for (resoultionIndex=0; resoultionIndex<pTestParm->nResoultions && handleIndex<total_thread; resoultionIndex++) {
+    for (resoultionIndex = 0; resoultionIndex < pTestParm->nResoultions && handleIndex < total_thread; resoultionIndex++) {
 
-	    pTestParm->cmd[resoultionIndex].simple = 
-			(pTestParm->cmd[resoultionIndex].type != MPP_VIDEO_CodingMJPEG) ? (1) : (0);
+        pTestParm->cmd[resoultionIndex].simple =
+            (pTestParm->cmd[resoultionIndex].type != MPP_VIDEO_CodingMJPEG) ? (1) : (0);
 
-	    RK_U32 i = 0;
+        RK_U32 i = 0;
 
-	    for (i=0; i<pTestParm->cmd[resoultionIndex].nthreads; i++) {
-		 if (pTestParm->cmd[resoultionIndex].nTestType == 1) {// type=1 decode
-		 	ret = pthread_create(&handles[handleIndex], NULL, mpi_dec_test_decode, & pTestParm->cmd[resoultionIndex]);
-		 } else if (pTestParm->cmd[resoultionIndex].nTestType == 2) {//type=2 encode
-		 	ret = pthread_create(&handles[handleIndex], NULL, mpi_enc_test, & pTestParm->cmd[resoultionIndex]);
-		 }
-	        
-	        if (ret != 0) {
-	            mpp_log("failed to create thread\n");
-	            return ret;
-	        }
-		 handleIndex++;
-	    }
+        for (i = 0; i < pTestParm->cmd[resoultionIndex].nthreads; i++) {
+            if (pTestParm->cmd[resoultionIndex].nTestType == 1) {// type=1 decode
+                ret = pthread_create(&handles[handleIndex], NULL, mpi_dec_test_decode, & pTestParm->cmd[resoultionIndex]);
+            } else if (pTestParm->cmd[resoultionIndex].nTestType == 2) {//type=2 encode
+                ret = pthread_create(&handles[handleIndex], NULL, mpi_enc_test, & pTestParm->cmd[resoultionIndex]);
+            }
+
+            if (ret != 0) {
+                mpp_log("failed to create thread\n");
+                return ret;
+            }
+            handleIndex++;
+        }
     }
 
     if (handleIndex != total_thread) {
-		printf("mpi dec multi test error.\n");
-		return 0;
+        printf("mpi dec multi test error.\n");
+        return 0;
     }
 
-    for (resoultionIndex=0, handleIndex=0; resoultionIndex<pTestParm->nResoultions && handleIndex<total_thread; resoultionIndex++) {
-	    RK_U32 j = 0;
-	    RK_U32 resoultion_rate = 0;
-	    RK_U32 average_rate = 0;
+    for (resoultionIndex = 0, handleIndex = 0; resoultionIndex < pTestParm->nResoultions && handleIndex < total_thread; resoultionIndex++) {
+        RK_U32 j = 0;
+        RK_U32 resoultion_rate = 0;
+        RK_U32 average_rate = 0;
 
-	    for (j=0; j<pTestParm->cmd[resoultionIndex].nthreads; j++) {
-	        pthread_join(handles[handleIndex], (void *)&rates[handleIndex]);
-        	 resoultion_rate += *rates[handleIndex];
-		 handleIndex++;
-	    }
-	    average_rate = resoultion_rate / pTestParm->cmd[resoultionIndex].nthreads;
-	    if (pTestParm->cmd[resoultionIndex].nTestType == 1) {
-			printf("====>DEC [%d x %d] average frame rate=%d\n", pTestParm->cmd[resoultionIndex].width,
-				pTestParm->cmd[resoultionIndex].height, average_rate);
-	    } else {
-	    		printf("====>ENC [%d x %d] average frame rate=%d\n", pTestParm->cmd[resoultionIndex].width,
-				pTestParm->cmd[resoultionIndex].height, average_rate);
-	    }
-	    total_rate += resoultion_rate;
+        for (j = 0; j < pTestParm->cmd[resoultionIndex].nthreads; j++) {
+            pthread_join(handles[handleIndex], (void *)&rates[handleIndex]);
+            resoultion_rate += *rates[handleIndex];
+            handleIndex++;
+        }
+        average_rate = resoultion_rate / pTestParm->cmd[resoultionIndex].nthreads;
+        if (pTestParm->cmd[resoultionIndex].nTestType == 1) {
+            printf("====>DEC [%d x %d] average frame rate=%d\n", pTestParm->cmd[resoultionIndex].width,
+                   pTestParm->cmd[resoultionIndex].height, average_rate);
+        } else {
+            printf("====>ENC [%d x %d] average frame rate=%d\n", pTestParm->cmd[resoultionIndex].width,
+                   pTestParm->cmd[resoultionIndex].height, average_rate);
+        }
+        total_rate += resoultion_rate;
     }
 
     total_rate /= total_thread;
