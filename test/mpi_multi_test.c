@@ -34,7 +34,7 @@
 
 #include <pthread.h>
 
-#define MPI_RESOLUTION_COUNT            4
+#define MPI_RESOLUTION_COUNT            10
 #define MPI_DEC_LOOP_COUNT                  4
 #define MPI_DEC_STREAM_SIZE                 (SZ_4K)
 #define MPI_ENC_IO_COUNT                    (4)
@@ -133,6 +133,7 @@ typedef struct {
     RK_S32          timeout;
 
     RK_U32          nthreads;
+    MppEncRcMode    rc_mode;// 0:VBR, 1:CBR
     RK_U32      nTestType;// 1:decode, 2:encode
 } MpiTestCmd;
 
@@ -356,6 +357,8 @@ MPP_RET test_ctx_init(MpiEncTestData **data, MpiTestCmd *cmd)
     p->fmt          = cmd->format;
     p->type         = cmd->type;
     p->num_frames   = cmd->num_frames;
+    p->rc_cfg.rc_mode = cmd->rc_mode;
+    mpp_log("rc_mode=%d\n", p->rc_cfg.rc_mode);
 
     if (cmd->have_input) {
         p->fp_input = fopen(cmd->file_input, "rb");
@@ -581,7 +584,7 @@ MPP_RET test_mpp_setup(MpiEncTestData *p)
     }
 
     rc_cfg->change  = MPP_ENC_RC_CFG_CHANGE_ALL;
-    rc_cfg->rc_mode = MPP_ENC_RC_MODE_CBR;
+    rc_cfg->rc_mode = p->rc_cfg.rc_mode;
     rc_cfg->quality = MPP_ENC_RC_QUALITY_MEDIUM;
 
     if (rc_cfg->rc_mode == MPP_ENC_RC_MODE_CBR) {
@@ -1664,6 +1667,9 @@ static RK_S32 mpi_test_parse_options(int argc, char **argv, MpiTestParam* pTestP
                     goto PARSE_OPINIONS_OUT;
                 }
                 break;
+            case 'r':
+                pTestParm->cmd[index].rc_mode = atoi(p + 2);
+                break;
             case 'q':
                 pTestParm->cmd[index].nTestType = atoi(p + 2);
                 break;
@@ -1689,7 +1695,7 @@ static void mpi_test_show_options(MpiTestParam* pTestParm)
 {
     RK_U32 index = 0;
     for (index = 0; index < pTestParm->nResoultions; index++) {
-        mpp_log("cmd parse result:--%d\n", index + 1);
+        mpp_log("cmd parse result:%d\n", index + 1);
         mpp_log("input  file name: %s\n", pTestParm->cmd[index].file_input);
         mpp_log("output file name: %s\n", pTestParm->cmd[index].file_output);
         mpp_log("width      : %4d\n", pTestParm->cmd[index].width);
