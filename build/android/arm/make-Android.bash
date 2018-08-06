@@ -4,7 +4,7 @@ HOST_IP=`hostname --all-ip-addresses`
 if [ ${HOST_IP} == "10.10.10.65" ] || [ ${HOST_IP} == "10.10.10.67" ]; then
     ANDROID_NDK=/home/pub/ndk/android-ndk-r10d/
 else
-    ANDROID_NDK=$PWD/../../../../CaffeOnACL/android-ndk-r15c/
+    ANDROID_NDK=$PWD/../../../../caffe-on-acl/android-ndk-r15c/
 fi
 
 PLATFORM=$ANDROID_NDK/platforms/android-21/arch-arm
