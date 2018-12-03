@@ -176,20 +176,41 @@ void *thread_output(void *arg)
                 mpp_log("decoder require buffer w:h [%d:%d] stride [%d:%d] size %d\n",
                         width, height, hor_stride, ver_stride, buf_size);
 
-                ret = mpp_buffer_group_get_internal(&data->frm_grp, MPP_BUFFER_TYPE_ION);
+                if (NULL == data->frm_grp) {
+                    /* If buffer group is not set create one and limit it */
+                    ret = mpp_buffer_group_get_internal(&data->frm_grp, MPP_BUFFER_TYPE_ION);
+                    if (ret) {
+                        mpp_err("get mpp buffer group failed ret %d\n", ret);
+                        break;
+                    }
+
+                    /* Set buffer to mpp decoder */
+                    ret = mpi->control(ctx, MPP_DEC_SET_EXT_BUF_GROUP, data->frm_grp);
+                    if (ret) {
+                        mpp_err("set buffer group failed ret %d\n", ret);
+                        break;
+                    }
+                } else {
+                    /* If old buffer group exist clear it */
+                    ret = mpp_buffer_group_clear(data->frm_grp);
+                    if (ret) {
+                        mpp_err("clear buffer group failed ret %d\n", ret);
+                        break;
+                    }
+                }
+
+                /* Use limit config to limit buffer count to 24 */
+                ret = mpp_buffer_group_limit_config(data->frm_grp, buf_size, 24);
                 if (ret) {
-                    mpp_err("get mpp buffer group  failed ret %d\n", ret);
+                    mpp_err("limit buffer group failed ret %d\n", ret);
                     break;
                 }
 
-                // setup max frame buffer limit to 18 which is enough for most case
-                ret = mpp_buffer_group_limit_config(data->frm_grp, buf_size, 18);
-                if (ret)
-                    mpp_err("config buffer group limit failed ret %d\n", ret);
-
-                mpi->control(ctx, MPP_DEC_SET_EXT_BUF_GROUP, data->frm_grp);
-
-                mpi->control(ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
+                ret = mpi->control(ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
+                if (ret) {
+                    mpp_err("info change ready failed ret %d\n", ret);
+                    break;
+                }
             } else {
                 // found normal output frame
                 RK_U32 err_info = mpp_frame_get_errinfo(frame) | mpp_frame_get_discard(frame);
@@ -260,8 +281,7 @@ int mpi_dec_test_decode(MpiDecTestCmd *cmd)
     MpiCmd mpi_cmd      = MPP_CMD_BASE;
     MppParam param      = NULL;
     RK_U32 need_split   = 1;
-    RK_U32 output_block = MPP_POLL_BLOCK;
-    RK_S64 block_timeout = cmd->timeout;
+    MppPollType timeout = cmd->timeout;
 
     // paramter for resource malloc
     RK_U32 width        = cmd->width;
@@ -332,22 +352,15 @@ int mpi_dec_test_decode(MpiDecTestCmd *cmd)
         goto MPP_TEST_OUT;
     }
 
-    // output timeout setup
-    // if timeout is 0 then it is non-block mode
-    // if timeout is -1 then it is block mode
-    // if timeout is positive value then it is timeout time in ms
-    if (block_timeout) {
-        param = &output_block;
-        ret = mpi->control(ctx, MPP_SET_OUTPUT_BLOCK, param);
+    // NOTE: timeout value please refer to MppPollType definition
+    //  0   - non-block call (default)
+    // -1   - block call
+    // +val - timeout value in ms
+    if (timeout) {
+        param = &timeout;
+        ret = mpi->control(ctx, MPP_SET_OUTPUT_TIMEOUT, param);
         if (MPP_OK != ret) {
-            mpp_err("Failed to set blocking mode on MPI (code = %d).\n", ret);
-            goto MPP_TEST_OUT;
-        }
-
-        param = &block_timeout;
-        ret = mpi->control(ctx, MPP_SET_OUTPUT_BLOCK_TIMEOUT, param);
-        if (MPP_OK != ret) {
-            mpp_err("Failed to set blocking mode on MPI (code = %d).\n", ret);
+            mpp_err("Failed to set output timeout %d ret %d\n", timeout, ret);
             goto MPP_TEST_OUT;
         }
     }

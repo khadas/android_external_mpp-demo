@@ -224,7 +224,6 @@ MPP_RET vp8d_parser_init(void *ctx, ParserCfg *parser_cfg)
     }
     p->packet_slots = parser_cfg->packet_slots;
     p->frame_slots = parser_cfg->frame_slots;
-    p->notify_cb = parser_cfg->notify_cb;
 
     mpp_buf_slot_setup(p->frame_slots, 15);
 
@@ -315,6 +314,11 @@ MPP_RET vp8d_parser_deinit(void *ctx)
     }
 
     vp8d_unref_allframe(p);
+
+    if (p->input_packet) {
+        mpp_packet_deinit(&p->input_packet);
+        p->input_packet = NULL;
+    }
 
     if ( NULL != p) {
         mpp_free(p);
@@ -942,8 +946,8 @@ static MPP_RET vp8_header_parser(VP8DParserContext_t *p, RK_U8 *pbase,
     p->coeffSkipMode =  vp8hwdDecodeBool128(bit_ctx);
     if (!p->keyFrame) {
         RK_U32  mvProbs;
-
-        p->probMbSkipFalse = vp8hwdReadBits(bit_ctx, 8);
+        if (p->coeffSkipMode)
+            p->probMbSkipFalse = vp8hwdReadBits(bit_ctx, 8);
         p->probIntra = vp8hwdReadBits(bit_ctx, 8);
         p->probRefLast = vp8hwdReadBits(bit_ctx, 8);
         p->probRefGolden = vp8hwdReadBits(bit_ctx, 8);
@@ -969,7 +973,8 @@ static MPP_RET vp8_header_parser(VP8DParserContext_t *p, RK_U8 *pbase,
             }
         }
     } else {
-        p->probMbSkipFalse = vp8hwdReadBits(bit_ctx, 8);
+        if (p->coeffSkipMode)
+            p->probMbSkipFalse = vp8hwdReadBits(bit_ctx, 8);
     }
     if (bit_ctx->strmError) {
         mpp_err_f("paser header stream no enough");

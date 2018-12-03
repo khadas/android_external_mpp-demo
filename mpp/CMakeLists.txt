@@ -3,6 +3,7 @@
 # setup mpp codec config first
 # ----------------------------------------------------------------------------
 include(codecs.cmake)
+include(vproc.cmake)
 
 # ----------------------------------------------------------------------------
 # add include directory
@@ -13,6 +14,7 @@ include_directories(base/inc)
 include_directories(codec/inc)
 include_directories(hal/inc)
 include_directories(hal/common)
+include_directories(vproc/inc)
 
 # ----------------------------------------------------------------------------
 # add mpp base component
@@ -25,6 +27,11 @@ add_subdirectory(base)
 add_subdirectory(codec)
 
 # ----------------------------------------------------------------------------
+# add video processor
+# ----------------------------------------------------------------------------
+add_subdirectory(vproc)
+
+# ----------------------------------------------------------------------------
 # add register generation hal
 # ----------------------------------------------------------------------------
 add_subdirectory(hal)
@@ -35,7 +42,7 @@ add_subdirectory(hal)
 set (MPP_SRC
     mpp_info.cpp
     mpp.cpp
-    mpi_impl.cpp
+    mpp_impl.cpp
     mpi.cpp
     )
 
@@ -45,9 +52,7 @@ set(MPP_ABI_VERSION "1")
 add_library(${MPP_STATIC} STATIC ${MPP_SRC})
 set_target_properties(${MPP_STATIC} PROPERTIES FOLDER "mpp")
 set_target_properties(${MPP_STATIC} PROPERTIES CLEAN_DIRECT_OUTPUT 1)
-target_link_libraries(${MPP_STATIC} mpp_base mpp_codec mpp_hal)
-set_target_properties(${MPP_STATIC} PROPERTIES C_VISIBILITY_PRESET default)
-set_target_properties(${MPP_STATIC} PROPERTIES CXX_VISIBILITY_PRESET default)
+target_link_libraries(${MPP_STATIC} mpp_base mpp_codec mpp_hal mpp_vproc)
 
 add_library(${MPP_SHARED} SHARED ${MPP_SRC})
 set_target_properties(${MPP_SHARED} PROPERTIES FOLDER "mpp")
@@ -64,8 +69,6 @@ endif()
 
 
 add_subdirectory(legacy)
-
-add_subdirectory(test)
 
 install(TARGETS ${MPP_STATIC} ${MPP_SHARED}
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"

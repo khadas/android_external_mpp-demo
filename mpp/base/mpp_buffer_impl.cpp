@@ -114,7 +114,7 @@ static const char *mode2str[MPP_BUFFER_MODE_BUTT] = {
 static const char *type2str[MPP_BUFFER_TYPE_BUTT] = {
     "normal",
     "ion",
-    "v4l2",
+    "dma-buf",
     "drm",
 };
 static const char *ops2str[BUF_OPS_BUTT] = {
@@ -327,6 +327,9 @@ MPP_RET mpp_buffer_create(const char *tag, const char *caller,
         inc_buffer_ref_no_lock(p, caller);
         *buffer = p;
     }
+
+    if (group->callback)
+        group->callback(group->arg, group);
 RET:
     MPP_BUF_FUNCTION_LEAVE();
     return ret;
@@ -397,10 +400,8 @@ MPP_RET mpp_buffer_ref_dec(MppBufferImpl *buffer, const char* caller)
                 }
             }
             group->count_used--;
-            if (group->listener) {
-                MppThread *thread = (MppThread *)group->listener;
-                thread->signal();
-            }
+            if (group->callback)
+                group->callback(group->arg, group);
         }
     }
 
@@ -508,7 +509,8 @@ MPP_RET mpp_buffer_group_reset(MppBufferGroupImpl *p)
     return MPP_OK;
 }
 
-MPP_RET mpp_buffer_group_set_listener(MppBufferGroupImpl *p, void *listener)
+MPP_RET mpp_buffer_group_set_callback(MppBufferGroupImpl *p,
+                                      MppBufCallback callback, void *arg)
 {
     AutoMutex auto_lock(MppBufferService::get_lock());
     if (NULL == p) {
@@ -518,15 +520,17 @@ MPP_RET mpp_buffer_group_set_listener(MppBufferGroupImpl *p, void *listener)
 
     MPP_BUF_FUNCTION_ENTER();
 
-    p->listener = listener;
+    p->callback = callback;
+    p->arg      = arg;
 
     MPP_BUF_FUNCTION_LEAVE();
     return MPP_OK;
 }
 
-void mpp_buffer_group_dump(MppBufferGroupImpl *group)
+void mpp_buffer_group_dump(MppBufferGroupImpl *group, const char *caller)
 {
-    mpp_log("\ndumping buffer group %p id %d\n", group, group->group_id);
+    mpp_log("\ndumping buffer group %p id %d from %s\n", group,
+            group->group_id, caller);
     mpp_log("mode %s\n", mode2str[group->mode]);
     mpp_log("type %s\n", type2str[group->type]);
     mpp_log("limit size %d count %d\n", group->limit_size, group->limit_count);
@@ -644,6 +648,7 @@ MppBufferGroupImpl *MppBufferService::get_group(const char *tag, const char *cal
                                                 MppBufferMode mode, MppBufferType type,
                                                 RK_U32 is_misc)
 {
+    MppBufferType buffer_type = (MppBufferType)(type & MPP_BUFFER_TYPE_MASK);
     MppBufferGroupImpl *p = mpp_calloc(MppBufferGroupImpl, 1);
     if (NULL == p) {
         mpp_err("MppBufferService failed to allocate group context\n");
@@ -670,7 +675,7 @@ MppBufferGroupImpl *MppBufferService::get_group(const char *tag, const char *cal
     }
     p->caller   = caller;
     p->mode     = mode;
-    p->type     = type;
+    p->type     = buffer_type;
     p->limit    = BUFFER_GROUP_SIZE_DEFAULT;
     p->group_id = id;
     p->clear_on_exit = (mpp_buffer_debug & MPP_BUF_DBG_CLR_ON_EXIT) ? (1) : (0);
@@ -680,10 +685,10 @@ MppBufferGroupImpl *MppBufferService::get_group(const char *tag, const char *cal
     buffer_group_add_log(p, NULL, GRP_CREATE, __FUNCTION__);
 
     mpp_assert(mode < MPP_BUFFER_MODE_BUTT);
-    mpp_assert(type < MPP_BUFFER_TYPE_BUTT);
+    mpp_assert(buffer_type < MPP_BUFFER_TYPE_BUTT);
 
     if (is_misc) {
-        misc[mode][type] = p;
+        misc[mode][buffer_type] = p;
         misc_count++;
     }
 
@@ -692,6 +697,7 @@ MppBufferGroupImpl *MppBufferService::get_group(const char *tag, const char *cal
 
 MppBufferGroupImpl *MppBufferService::get_misc(MppBufferMode mode, MppBufferType type)
 {
+    type = (MppBufferType)(type & MPP_BUFFER_TYPE_MASK);
     if (type == MPP_BUFFER_TYPE_NORMAL)
         return NULL;
 
@@ -703,6 +709,7 @@ MppBufferGroupImpl *MppBufferService::get_misc(MppBufferMode mode, MppBufferType
 
 void MppBufferService::set_misc(MppBufferMode mode, MppBufferType type, MppBufferGroupImpl *val)
 {
+    type = (MppBufferType)(type & MPP_BUFFER_TYPE_MASK);
     if (type == MPP_BUFFER_TYPE_NORMAL)
         return ;
 
@@ -733,7 +740,7 @@ void MppBufferService::put_group(MppBufferGroupImpl *p)
             mpp_err("mpp_group %p tag %s caller %s mode %s type %s deinit with %d bytes not released\n",
                     p, p->tag, p->caller, mode2str[p->mode], type2str[p->type], p->usage);
 
-            mpp_buffer_group_dump(p);
+            mpp_buffer_group_dump(p, __FUNCTION__);
         }
 
         /* if clear on exit we need to release remaining buffer */
@@ -826,7 +833,7 @@ void MppBufferService::dump_misc_group()
     for (i = 0; i < MPP_BUFFER_MODE_BUTT; i++)
         for (j = 0; j < MPP_BUFFER_TYPE_BUTT; j++) {
             if (misc[i][j])
-                mpp_buffer_group_dump(misc[i][j]);
+                mpp_buffer_group_dump(misc[i][j], __FUNCTION__);
         }
 }
 

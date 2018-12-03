@@ -162,6 +162,7 @@ static MPP_RET h263_parse_picture_header(H263dParserImpl *p, BitReadCtx_t *gb)
     /* time reference */
     READ_BITS(gb, 8, &hdr_curr->TR);
 
+    /* first 5 bit of PTYPE */
     SKIP_BITS(gb, 5);
 
     /* source format */
@@ -173,10 +174,16 @@ static MPP_RET h263_parse_picture_header(H263dParserImpl *p, BitReadCtx_t *gb)
         return MPP_NOK;
     }
 
+    /* picture coding type: 0 - INTRA, 1 - INTER */
     READ_BITS(gb, 1, &val);
     pict_type = val;
 
-    SKIP_BITS(gb, 4);
+    /* last 4 bit for PTYPE: UMV, AP mode, PB frame */
+    READ_BITS(gb, 4, &val);
+    if (val) {
+        mpp_err_f("unsupport PTYPE mode %x\n", val);
+        return MPP_NOK;
+    }
 
     READ_BITS(gb, 5, &val);
     hdr_curr->quant = val;
@@ -223,7 +230,6 @@ MPP_RET mpp_h263_parser_init(H263dParser *ctx, MppBufSlots frame_slots)
 
     mpp_buf_slot_setup(frame_slots, 4);
     p->frame_slots      = frame_slots;
-    p->use_internal_pts = 0;
     p->pos_frm_start    = -1;
     p->pos_frm_end      = -1;
     p->bit_ctx          = bit_ctx;
@@ -429,10 +435,7 @@ MPP_RET mpp_h263_parser_decode(H263dParser ctx, MppPacket pkt)
 
     p->width  = p->hdr_curr.width;
     p->height = p->hdr_curr.height;
-
-    if (!p->use_internal_pts)
-        p->pts  = mpp_packet_get_pts(pkt);
-
+    p->pts  = mpp_packet_get_pts(pkt);
 __BITREAD_ERR:
     h263d_dbg_status("found i_frame %d frame_type %d ret %d\n",
                      p->found_i_vop, p->hdr_curr.pict_type, ret);
@@ -570,10 +573,5 @@ MPP_RET mpp_h263_parser_update_dpb(H263dParser ctx)
     return MPP_OK;
 }
 
-MPP_RET mpp_h263_parser_set_pts_mode(H263dParser ctx, RK_U32 use_internal_pts)
-{
-    H263dParserImpl *p = (H263dParserImpl *)ctx;
-    p->use_internal_pts = use_internal_pts;
-    return MPP_OK;
-}
+
 

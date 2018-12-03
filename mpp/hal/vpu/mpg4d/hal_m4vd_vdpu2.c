@@ -132,9 +132,9 @@ static void vdpu2_mpg4d_setup_regs_by_syntax(hal_mpg4_ctx *ctx, MppSyntax syntax
         RK_U32 time_bp = pp->time_bp;
         RK_U32 time_pp = pp->time_pp;
 
-        RK_U32 trb_per_trd_d0  = ((((RK_S64)(1 * time_bp + 0)) << 27) + 1 * (time_pp - 1)) / time_pp;
-        RK_U32 trb_per_trd_d1  = ((((RK_S64)(2 * time_bp + 1)) << 27) + 2 * (time_pp - 0)) / (2 * time_pp + 1);
-        RK_U32 trb_per_trd_dm1 = ((((RK_S64)(2 * time_bp - 1)) << 27) + 2 * (time_pp - 1)) / (2 * time_pp - 1);
+        RK_U32 trb_per_trd_d0  = MPP_DIV((((RK_S64)(1 * time_bp + 0)) << 27) + 1 * (time_pp - 1), time_pp);
+        RK_U32 trb_per_trd_d1  = MPP_DIV((((RK_S64)(2 * time_bp + 1)) << 27) + 2 * (time_pp - 0), 2 * time_pp + 1);
+        RK_U32 trb_per_trd_dm1 = MPP_DIV((((RK_S64)(2 * time_bp - 1)) << 27) + 2 * (time_pp - 1), 2 * time_pp - 1);
 
         regs->reg57_enable_ctrl.sw_pic_type_sel1 = 1;
         regs->reg57_enable_ctrl.sw_pic_type_sel0 = 1;
@@ -229,7 +229,6 @@ MPP_RET vdpu2_mpg4d_init(void *hal, MppHalCfg *cfg)
     MppBuffer mv_buf = NULL;
     MppBuffer qp_table = NULL;
     hal_mpg4_ctx *ctx = (hal_mpg4_ctx *)hal;
-    RK_S32 vpu_fd = -1;
 
     mpp_assert(hal);
 
@@ -258,14 +257,18 @@ MPP_RET vdpu2_mpg4d_init(void *hal, MppHalCfg *cfg)
         goto ERR_RET;
     }
 
-#ifdef RKPLATFORM
-    vpu_fd = mpp_device_init(&ctx->dev_ctx, MPP_CTX_DEC, MPP_VIDEO_CodingMPEG4);
-    if (vpu_fd < 0) {
-        mpp_err_f("failed to open vpu client\n");
-        ret = MPP_ERR_UNKNOW;
+    MppDevCfg dev_cfg = {
+        .type = MPP_CTX_DEC,              /* type */
+        .coding = MPP_VIDEO_CodingMPEG4,  /* coding */
+        .platform = 0,                    /* platform */
+        .pp_enable = 0,                   /* pp_enable */
+    };
+
+    ret = mpp_device_init(&ctx->dev_ctx, &dev_cfg);
+    if (ret) {
+        mpp_err_f("mpp_device_init failed. ret: %d\n", ret);
         goto ERR_RET;
     }
-#endif
 
     /*
      * basic register configuration setup here
@@ -290,7 +293,6 @@ MPP_RET vdpu2_mpg4d_init(void *hal, MppHalCfg *cfg)
     ctx->pkt_slots  = cfg->packet_slots;
     ctx->int_cb     = cfg->hal_int_cb;
     ctx->group      = group;
-    ctx->vpu_fd     = vpu_fd;
     ctx->mv_buf     = mv_buf;
     ctx->qp_table   = qp_table;
     ctx->regs       = regs;
@@ -349,12 +351,11 @@ MPP_RET vdpu2_mpg4d_deinit(void *hal)
         ctx->group = NULL;
     }
 
-#ifdef RKPLATFORM
-    if (ctx->vpu_fd >= 0) {
-        mpp_device_deinit(ctx->vpu_fd);
-        ctx->vpu_fd = -1;
+    if (ctx->dev_ctx) {
+        ret = mpp_device_deinit(ctx->dev_ctx);
+        if (ret)
+            mpp_err("mpp_device_deinit failed. ret: %d\n", ret);
     }
-#endif
 
     return ret;
 }
@@ -403,8 +404,6 @@ MPP_RET vdpu2_mpg4d_gen_regs(void *hal,  HalTaskInfo *syn)
 MPP_RET vdpu2_mpg4d_start(void *hal, HalTaskInfo *task)
 {
     MPP_RET ret = MPP_OK;
-
-#ifdef RKPLATFORM
     hal_mpg4_ctx *ctx = (hal_mpg4_ctx *)hal;
     RK_U32 reg_count = (sizeof(*(M4vdVdpu2Regs_t *)ctx->regs) / sizeof(RK_U32));
     RK_U32* regs = (RK_U32 *)ctx->regs;
@@ -416,10 +415,8 @@ MPP_RET vdpu2_mpg4d_start(void *hal, HalTaskInfo *task)
         }
     }
 
-    ret = mpp_device_send_reg(ctx->vpu_fd, regs, reg_count);
-#endif
-    (void)ret;
-    (void)hal;
+    ret = mpp_device_send_reg(ctx->dev_ctx, regs, reg_count);
+
     (void)task;
     return ret;
 }
@@ -427,13 +424,12 @@ MPP_RET vdpu2_mpg4d_start(void *hal, HalTaskInfo *task)
 MPP_RET vdpu2_mpg4d_wait(void *hal, HalTaskInfo *task)
 {
     MPP_RET ret = MPP_OK;
-#ifdef RKPLATFORM
     hal_mpg4_ctx *ctx = (hal_mpg4_ctx *)hal;
     M4vdVdpu2Regs_t reg_out;
     RK_U32* regs = (RK_U32 *)&reg_out;
     RK_U32 reg_count = (sizeof(reg_out) / sizeof(RK_U32));
 
-    ret = mpp_device_wait_reg(ctx->vpu_fd, regs, (sizeof(reg_out) / sizeof(RK_U32)));
+    ret = mpp_device_wait_reg(ctx->dev_ctx, regs, (sizeof(reg_out) / sizeof(RK_U32)));
 
     if (mpg4d_hal_debug & MPG4D_HAL_DBG_REG_GET) {
         RK_U32 i = 0;
@@ -442,9 +438,7 @@ MPP_RET vdpu2_mpg4d_wait(void *hal, HalTaskInfo *task)
             mpp_log("reg[%03d]: %08x\n", i, regs[i]);
         }
     }
-#endif
-    (void)ret;
-    (void)hal;
+
     (void)task;
     return ret;
 }

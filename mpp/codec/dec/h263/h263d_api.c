@@ -45,7 +45,6 @@ typedef struct {
     RK_U32          need_split;
     RK_U32          frame_count;
     RK_U32          internal_pts;
-    IOInterruptCB   notify_cb;
 
     // parser context
     H263dParser     parser;
@@ -94,7 +93,6 @@ MPP_RET h263d_init(void *dec, ParserCfg *cfg)
     p->task_count   = cfg->task_count = 2;
     p->need_split   = cfg->need_split;
     p->internal_pts = cfg->internal_pts;
-    p->notify_cb    = cfg->notify_cb;
     p->stream       = stream;
     p->stream_size  = stream_size;
     p->task_pkt     = task_pkt;
@@ -163,19 +161,11 @@ MPP_RET h263d_flush(void *dec)
 
 MPP_RET h263d_control(void *dec, RK_S32 cmd_type, void *param)
 {
-    H263dCtx *p;
-
     if (NULL == dec) {
         mpp_err_f("found NULL intput\n");
         return MPP_ERR_NULL_PTR;
     }
-
-    p = (H263dCtx *)dec;
-    switch (cmd_type) {
-    case MPP_DEC_SET_INTERNAL_PTS_ENABLE : {
-        mpp_h263_parser_set_pts_mode(p->parser, 0);
-    } break;
-    }
+    (void)cmd_type;
     (void)param;
     return MPP_OK;
 }
@@ -321,17 +311,17 @@ MPP_RET h263d_callback(void *dec, void *err_info)
 }
 
 const ParserApi api_h263d_parser = {
-    "api_h263d_parser",
-    MPP_VIDEO_CodingH263,
-    sizeof(H263dCtx),
-    0,
-    h263d_init,
-    h263d_deinit,
-    h263d_prepare,
-    h263d_parse,
-    h263d_reset,
-    h263d_flush,
-    h263d_control,
-    h263d_callback,
+    .name = "api_h263d_parser",
+    .coding = MPP_VIDEO_CodingH263,
+    .ctx_size = sizeof(H263dCtx),
+    .flag = 0,
+    .init = h263d_init,
+    .deinit = h263d_deinit,
+    .prepare = h263d_prepare,
+    .parse = h263d_parse,
+    .reset = h263d_reset,
+    .flush = h263d_flush,
+    .control = h263d_control,
+    .callback = h263d_callback,
 };
 

@@ -140,26 +140,54 @@ typedef enum {
 } MppBufferMode;
 
 /*
- * mpp buffer has two types:
+ * the mpp buffer has serval types:
  *
  * normal   : normal malloc buffer for unit test or hardware simulation
  * ion      : use ion device under Android/Linux, MppBuffer will encapsulte ion file handle
+ * ext_dma  : the DMABUF(DMA buffers) come from the application
+ * drm      : use the drm device interface for memory management
  */
 typedef enum {
     MPP_BUFFER_TYPE_NORMAL,
     MPP_BUFFER_TYPE_ION,
-    MPP_BUFFER_TYPE_V4L2,
+    MPP_BUFFER_TYPE_EXT_DMA,
     MPP_BUFFER_TYPE_DRM,
     MPP_BUFFER_TYPE_BUTT,
 } MppBufferType;
 
+#define MPP_BUFFER_TYPE_MASK            0x0000FFFF
+
+/*
+ * MPP_BUFFER_FLAGS cooperate with MppBufferType
+ * 16 high bits of MppBufferType are used in flags
+ *
+ * eg:
+ * DRM CMA buffer : MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CONTIG
+ *                  = 0x00010003
+ * DRM SECURE buffer: MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_SECURE
+ *                  = 0x00080003
+ *
+ * flags originate from drm_rockchip_gem_mem_type
+ */
+
+#define MPP_BUFFER_FLAGS_MASK           0x000f0000      //ROCKCHIP_BO_MASK << 16
+#define MPP_BUFFER_FLAGS_CONTIG         0x00010000      //ROCKCHIP_BO_CONTIG << 16
+#define MPP_BUFFER_FLAGS_CACHABLE       0x00020000      //ROCKCHIP_BO_CACHABLE << 16
+#define MPP_BUFFER_FLAGS_WC             0x00040000      //ROCKCHIP_BO_WC << 16
+#define MPP_BUFFER_FLAGS_SECURE         0x00080000      //ROCKCHIP_BO_SECURE << 16
+
 /*
  * MppBufferInfo variable's meaning is different in different MppBufferType
+ *
+ * Common
+ * index - the buffer index used to track buffer in buffer pool
+ * size  - the buffer size
  *
  * MPP_BUFFER_TYPE_NORMAL
  *
  * ptr  - virtual address of normal malloced buffer
- * fd   - unused and set to -1
+ * fd   - unused and set to -1, the allocator would return its
+ *         internal buffer counter number
  *
  * MPP_BUFFER_TYPE_ION
  *
@@ -167,9 +195,6 @@ typedef enum {
  * hnd  - ion handle in user space
  * fd   - ion buffer file handle for map / unmap
  *
- * MPP_BUFFER_TYPE_V4L2
- *
- * TODO: to be implemented.
  */
 typedef struct MppBufferInfo_t {
     MppBufferType   type;
@@ -292,6 +317,7 @@ MPP_RET mpp_buffer_group_get(MppBufferGroup *group, MppBufferType type, MppBuffe
 MPP_RET mpp_buffer_group_put(MppBufferGroup group);
 MPP_RET mpp_buffer_group_clear(MppBufferGroup group);
 RK_S32  mpp_buffer_group_unused(MppBufferGroup group);
+size_t  mpp_buffer_group_usage(MppBufferGroup group);
 MppBufferMode mpp_buffer_group_mode(MppBufferGroup group);
 MppBufferType mpp_buffer_group_type(MppBufferGroup group);
 

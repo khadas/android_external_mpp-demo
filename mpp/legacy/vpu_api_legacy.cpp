@@ -16,9 +16,7 @@
 
 #define MODULE_TAG "vpu_api_legacy"
 
-#ifdef RKPLATFORM
 #include <fcntl.h>
-#endif
 #include "string.h"
 
 #include "mpp_log.h"
@@ -29,10 +27,8 @@
 
 #include "vpu_api_legacy.h"
 #include "mpp_packet_impl.h"
+#include "mpp_buffer_impl.h"
 #include "mpp_frame.h"
-
-#define MAX_WRITE_HEIGHT        (480)
-#define MAX_WRITE_WIDTH         (960)
 
 RK_U32 vpu_api_debug = 0;
 
@@ -106,7 +102,8 @@ static MPP_RET vpu_api_set_enc_cfg(MppCtx mpp_ctx, MppApi *mpi,
     RK_S32 gop      = (cfg->intraPicRate) ? (cfg->intraPicRate) : (fps_out);
     RK_S32 qp_init  = (coding == MPP_VIDEO_CodingAVC) ? (26) :
                       (coding == MPP_VIDEO_CodingMJPEG) ? (10) :
-                      (coding == MPP_VIDEO_CodingVP8) ? (56) : (0);
+                      (coding == MPP_VIDEO_CodingVP8) ? (56) :
+                      (coding == MPP_VIDEO_CodingHEVC) ? (26) : (0);
     RK_S32 qp       = (cfg->qp) ? (cfg->qp) : (qp_init);
     RK_S32 profile  = cfg->profileIdc;
     RK_S32 level    = cfg->levelIdc;
@@ -193,17 +190,20 @@ static MPP_RET vpu_api_set_enc_cfg(MppCtx mpp_ctx, MppApi *mpi,
         } else {
             /* constant bitrate do not limit qp range */
             codec_cfg->h264.qp_init     = 0;
-            codec_cfg->h264.qp_max      = 48;
-            codec_cfg->h264.qp_min      = 4;
-            codec_cfg->h264.qp_max_step = 16;
+            codec_cfg->h264.qp_max      = 51;
+            codec_cfg->h264.qp_min      = 10;
+            codec_cfg->h264.qp_max_step = 4;
         }
     } break;
     case MPP_VIDEO_CodingMJPEG : {
         codec_cfg->jpeg.change = MPP_ENC_JPEG_CFG_CHANGE_QP;
         codec_cfg->jpeg.quant = qp;
     } break;
+    case MPP_VIDEO_CodingHEVC : {
+        codec_cfg->h265.change = MPP_ENC_H265_CFG_INTRA_QP_CHANGE;
+        codec_cfg->h265.intra_qp = qp;
+    } break;
     case MPP_VIDEO_CodingVP8 :
-    case MPP_VIDEO_CodingHEVC :
     default : {
         mpp_err_f("support encoder coding type %d\n", coding);
     } break;
@@ -215,58 +215,9 @@ RET:
     return ret;
 }
 
-static void vpu_api_dump_yuv(VPU_FRAME *vframe, FILE *fp, RK_U8 *fp_buf, RK_S64 pts)
-{
-    //!< Dump yuv
-    if (fp && !vframe->ErrorInfo) {
-        RK_U8 *ptr = (RK_U8 *)vframe->vpumem.vir_addr;
-
-        if ((vframe->FrameWidth >= 1920) || (vframe->FrameHeight >= 1080)) {
-            RK_U32 i = 0, j = 0, step = 0;
-            RK_U32 img_w = 0, img_h = 0;
-            RK_U8 *pdes = NULL, *psrc = NULL;
-
-            step = MPP_MAX(vframe->FrameWidth / MAX_WRITE_WIDTH, vframe->FrameHeight / MAX_WRITE_HEIGHT);
-            img_w = vframe->FrameWidth / step;
-            img_h = vframe->FrameHeight / step;
-            pdes = fp_buf;
-            psrc = ptr;
-            for (i = 0; i < img_h; i++) {
-                for (j = 0; j < img_w; j++) {
-                    pdes[j] = psrc[j * step];
-                }
-                pdes += img_w;
-                psrc += step * vframe->FrameWidth;
-            }
-            pdes = fp_buf + img_w * img_h;
-            psrc = (RK_U8 *)ptr + vframe->FrameWidth * vframe->FrameHeight;
-            for (i = 0; i < (img_h / 2); i++) {
-                for (j = 0; j < (img_w / 2); j++) {
-                    pdes[2 * j + 0] = psrc[2 * j * step + 0];
-                    pdes[2 * j + 1] = psrc[2 * j * step + 1];
-                }
-                pdes += img_w;
-                psrc += step * vframe->FrameWidth * ((vframe->ColorType & VPU_OUTPUT_FORMAT_BIT_10) ? 2 : 1);
-            }
-            fwrite(fp_buf, 1, img_w * img_h * 3 / 2, fp);
-            if (vpu_api_debug & VPU_API_DBG_DUMP_LOG) {
-                mpp_log("[write_out_yuv] timeUs=%lld, FrameWidth=%d, FrameHeight=%d", pts, img_w, img_h);
-            }
-        } else {
-            fwrite(ptr, 1, vframe->FrameWidth * vframe->FrameHeight * 3 / 2, fp);
-            if (vpu_api_debug & VPU_API_DBG_DUMP_LOG) {
-                mpp_log("[write_out_yuv] timeUs=%lld, FrameWidth=%d, FrameHeight=%d", pts, vframe->FrameWidth, vframe->FrameHeight);
-            }
-        }
-        fflush(fp);
-    }
-}
-
 static int is_valid_dma_fd(int fd)
 {
     int ret = 1;
-
-#ifdef RKPLATFORM
     /* detect input file handle */
     int fs_flag = fcntl(fd, F_GETFL, NULL);
     int fd_flag = fcntl(fd, F_GETFD, NULL);
@@ -274,9 +225,7 @@ static int is_valid_dma_fd(int fd)
     if (fs_flag == -1 || fd_flag == -1) {
         ret = 0;
     }
-#else
-    (void) fd;
-#endif
+
     return ret;
 }
 
@@ -337,24 +286,15 @@ VpuApiLegacy::VpuApiLegacy() :
     init_ok(0),
     frame_count(0),
     set_eos(0),
-    fp(NULL),
-    fp_buf(NULL),
     memGroup(NULL),
     format(MPP_FMT_YUV420P),
     fd_input(-1),
     fd_output(-1),
     mEosSet(0)
 {
-    mpp_env_get_u32("vpu_api_debug", &vpu_api_debug, 0);
-
     vpu_api_dbg_func("enter\n");
 
     mpp_create(&mpp_ctx, &mpi);
-
-    if (vpu_api_debug & VPU_API_DBG_DUMP_YUV) {
-        fp = fopen("/sdcard/rk_mpp_dump.yuv", "wb");
-        fp_buf = mpp_malloc(RK_U8, (MAX_WRITE_HEIGHT * MAX_WRITE_WIDTH * 2));
-    }
 
     memset(&enc_cfg, 0, sizeof(enc_cfg));
     vpu_api_dbg_func("leave\n");
@@ -363,14 +303,7 @@ VpuApiLegacy::VpuApiLegacy() :
 VpuApiLegacy::~VpuApiLegacy()
 {
     vpu_api_dbg_func("enter\n");
-    if (fp) {
-        fclose(fp);
-        fp = NULL;
-    }
-    if (fp_buf) {
-        mpp_free(fp_buf);
-        fp_buf = NULL;
-    }
+
     if (memGroup) {
         mpp_buffer_group_put(memGroup);
         memGroup = NULL;
@@ -446,9 +379,9 @@ RK_S32 VpuApiLegacy::init(VpuCodecContext *ctx, RK_U8 *extraData, RK_U32 extra_s
         MppPollType block = MPP_POLL_BLOCK;
 
         /* setup input / output block mode */
-        ret = mpi->control(mpp_ctx, MPP_SET_INPUT_BLOCK, (MppParam)&block);
+        ret = mpi->control(mpp_ctx, MPP_SET_INPUT_TIMEOUT, (MppParam)&block);
         if (MPP_OK != ret)
-            mpp_err("mpi->control MPP_SET_INPUT_BLOCK failed\n");
+            mpp_err("mpi->control MPP_SET_INPUT_TIMEOUT failed\n");
 
         if (memGroup == NULL) {
             ret = mpp_buffer_group_get_internal(&memGroup, MPP_BUFFER_TYPE_ION);
@@ -484,21 +417,26 @@ RK_S32 VpuApiLegacy::init(VpuCodecContext *ctx, RK_U8 *extraData, RK_U32 extra_s
             ctx->extradata      = mpp_packet_get_data(pkt);
         }
         pkt = NULL;
-    }
+    } else { /* MPP_CTX_DEC */
+        vpug.CodecType  = ctx->codecType;
+        vpug.ImgWidth   = ctx->width;
+        vpug.ImgHeight  = ctx->height;
 
-    vpug.CodecType  = ctx->codecType;
-    vpug.ImgWidth   = ctx->width;
-    vpug.ImgHeight  = ctx->height;
-
-    if (MPP_CTX_DEC == type)
         init_frame_info(ctx, mpp_ctx, mpi, &vpug);
 
-    if (extraData != NULL) {
-        mpp_packet_init(&pkt, extraData, extra_size);
-        mpp_packet_set_extra_data(pkt);
-        mpi->decode_put_packet(mpp_ctx, pkt);
-        mpp_packet_deinit(&pkt);
+        if (extraData != NULL) {
+            mpp_packet_init(&pkt, extraData, extra_size);
+            mpp_packet_set_extra_data(pkt);
+            mpi->decode_put_packet(mpp_ctx, pkt);
+            mpp_packet_deinit(&pkt);
+        }
+
+        RK_U32 flag = 0;
+        ret = mpi->control(mpp_ctx, MPP_DEC_SET_ENABLE_DEINTERLACE, &flag);
+        if (ret)
+            mpp_err_f("disable mpp deinterlace failed ret %d\n", ret);
     }
+
     init_ok = 1;
 
     vpu_api_dbg_func("leave\n");
@@ -596,7 +534,9 @@ static void setup_VPU_FRAME_from_mpp_frame(VPU_FRAME *vframe, MppFrame mframe)
     }
 
     if (buf) {
-        void* ptr = mpp_buffer_get_ptr(buf);
+        MppBufferImpl *p = (MppBufferImpl*)buf;
+        void *ptr = (p->mode == MPP_BUFFER_INTERNAL) ?
+                    mpp_buffer_get_ptr(buf) : NULL;
         RK_S32 fd = mpp_buffer_get_fd(buf);
 
         vframe->FrameBusAddr[0] = fd;
@@ -820,7 +760,6 @@ RK_S32 VpuApiLegacy::decode(VpuCodecContext *ctx, VideoPacket_t *pkt, DecoderOut
             MppBuffer buf = mpp_frame_get_buffer(mframe);
 
             setup_VPU_FRAME_from_mpp_frame(vframe, mframe);
-            vpu_api_dump_yuv(vframe, fp, fp_buf, mpp_frame_get_pts(mframe));
 
             aDecOut->size = sizeof(VPU_FRAME);
             aDecOut->timeUs = mpp_frame_get_pts(mframe);
@@ -929,18 +868,19 @@ RK_S32 VpuApiLegacy::decode_getoutframe(DecoderOut_t *aDecOut)
         MppBuffer buf = mpp_frame_get_buffer(mframe);
 
         setup_VPU_FRAME_from_mpp_frame(vframe, mframe);
-        vpu_api_dump_yuv(vframe, fp, fp_buf, mpp_frame_get_pts(mframe));
 
         aDecOut->size = sizeof(VPU_FRAME);
         aDecOut->timeUs = mpp_frame_get_pts(mframe);
         frame_count++;
 
-        if (mpp_frame_get_eos(mframe)) {
+        if (mpp_frame_get_eos(mframe) && !mpp_frame_get_info_change(mframe)) {
             set_eos = 1;
             if (buf == NULL) {
                 aDecOut->size = 0;
                 mEosSet = 1;
                 ret = VPU_API_EOS_STREAM_REACHED;
+            } else {
+                aDecOut->nFlags |= VPU_API_EOS_STREAM_REACHED;
             }
         }
         if (vpu_api_debug & VPU_API_DBG_OUTPUT) {
@@ -1220,26 +1160,14 @@ RK_S32 VpuApiLegacy::encoder_sendframe(VpuCodecContext *ctx, EncInputStream_t *a
     RK_U32 height       = ctx->height;
     RK_U32 hor_stride   = MPP_ALIGN(width,  16);
     RK_U32 ver_stride   = MPP_ALIGN(height, 16);
-    RK_S32 pts          = (RK_S32)aEncInStrm->timeUs;
+    RK_S64 pts          = aEncInStrm->timeUs;
     RK_S32 fd           = aEncInStrm->bufPhyAddr;
     RK_U32 size         = aEncInStrm->size;
-    RK_U32 align_size   = 0;
 
     /* try import input buffer and output buffer */
     MppFrame frame = NULL;
-    MppBuffer buffer = NULL;
 
-    if (format >= MPP_FMT_YUV420SP && format < MPP_FMT_YUV_BUTT) {
-        align_size = hor_stride * ver_stride * 3 / 2;
-    } else if (format >= MPP_FMT_RGB565 && format < MPP_FMT_BGR888) {
-        align_size = hor_stride * ver_stride * 3;
-    } else if (format >= MPP_FMT_RGB101010 && format < MPP_FMT_RGB_BUTT) {
-        align_size = hor_stride * ver_stride * 4;
-    } else {
-        mpp_err_f("unsupport input format:%d\n", format);
-        ret = MPP_NOK;
-        goto FUNC_RET;
-    }
+
 
     ret = mpp_frame_init(&frame);
     if (MPP_OK != ret) {
@@ -1263,34 +1191,54 @@ RK_S32 VpuApiLegacy::encoder_sendframe(VpuCodecContext *ctx, EncInputStream_t *a
         inputCommit.type = MPP_BUFFER_TYPE_ION;
         inputCommit.size = size;
         inputCommit.fd = fd;
-
-        ret = mpp_buffer_import(&buffer, &inputCommit);
-        if (ret) {
-            mpp_err_f("import input picture buffer failed\n");
-            goto FUNC_RET;
+        if (size > 0) {
+            MppBuffer buffer = NULL;
+            ret = mpp_buffer_import(&buffer, &inputCommit);
+            if (ret) {
+                mpp_err_f("import input picture buffer failed\n");
+                goto FUNC_RET;
+            }
+            mpp_frame_set_buffer(frame, buffer);
+            mpp_buffer_put(buffer);
+            buffer = NULL;
         }
     } else {
+        RK_U32 align_size   = 0;
+
         if (NULL == aEncInStrm->buf) {
             ret = MPP_ERR_NULL_PTR;
             goto FUNC_RET;
         }
-
-        ret = mpp_buffer_get(memGroup, &buffer, align_size);
-        if (ret) {
-            mpp_err_f("allocate input picture buffer failed\n");
+        if (format >= MPP_FMT_YUV420SP && format < MPP_FMT_YUV_BUTT) {
+            align_size = hor_stride * ver_stride * 3 / 2;
+        } else if (format >= MPP_FMT_RGB565 && format < MPP_FMT_BGR888) {
+            align_size = hor_stride * ver_stride * 3;
+        } else if (format >= MPP_FMT_RGB101010 && format < MPP_FMT_RGB_BUTT) {
+            align_size = hor_stride * ver_stride * 4;
+        } else {
+            mpp_err_f("unsupport input format:%d\n", format);
+            ret = MPP_NOK;
             goto FUNC_RET;
         }
-        copy_align_raw_buffer_to_dest((RK_U8 *)mpp_buffer_get_ptr(buffer), aEncInStrm->buf, width, height, format);
+        if (align_size > 0) {
+            MppBuffer buffer = NULL;
+            ret = mpp_buffer_get(memGroup, &buffer, align_size);
+            if (ret) {
+                mpp_err_f("allocate input picture buffer failed\n");
+                goto FUNC_RET;
+            }
+            copy_align_raw_buffer_to_dest((RK_U8 *)mpp_buffer_get_ptr(buffer),
+                                          aEncInStrm->buf, width, height, format);
+            mpp_frame_set_buffer(frame, buffer);
+            mpp_buffer_put(buffer);
+            buffer = NULL;
+        }
     }
 
-    vpu_api_dbg_input("w %d h %d input fd %d size %d flag %d pts %lld\n",
+    vpu_api_dbg_input("w %d h %d input fd %d size %d pts %lld, flag %d \n",
                       width, height, fd, size, aEncInStrm->timeUs, aEncInStrm->nFlags);
 
-    mpp_frame_set_buffer(frame, buffer);
-    mpp_buffer_put(buffer);
-    buffer = NULL;
-
-    if (aEncInStrm->nFlags || aEncInStrm->size == 0) {
+    if (aEncInStrm->nFlags) {
         mpp_log_f("found eos true");
         mpp_frame_set_eos(frame, 1);
     }
@@ -1311,31 +1259,30 @@ RK_S32 VpuApiLegacy::encoder_getstream(VpuCodecContext *ctx, EncoderOut_t *aEncO
     RK_S32 ret = 0;
     MppPacket packet = NULL;
     vpu_api_dbg_func("enter\n");
-    (void) ctx;
 
     ret = mpi->encode_get_packet(mpp_ctx, &packet);
     if (ret) {
         mpp_err_f("encode_get_packet failed ret %d\n", ret);
         goto FUNC_RET;
     }
-
     if (packet) {
         RK_U8 *src = (RK_U8 *)mpp_packet_get_data(packet);
         RK_U32 eos = mpp_packet_get_eos(packet);
         RK_S64 pts = mpp_packet_get_pts(packet);
         RK_U32 flag = mpp_packet_get_flag(packet);
         size_t length = mpp_packet_get_length(packet);
-        size_t size = MPP_ALIGN(length + 4, SZ_4K);
-        aEncOut->data = mpp_malloc(RK_U8, size);
 
+        RK_U32 offset = 0;
         if (ctx->videoCoding == OMX_RK_VIDEO_CodingAVC) {
-            // remove first 00 00 00 01
-            length -= 4;
-            memcpy(aEncOut->data, src + 4, length);
-        } else {
-            memcpy(aEncOut->data, src, length);
+            offset = 4;
+            length = (length > offset) ? (length - offset) : 0;
         }
-
+        aEncOut->data = NULL;
+        if (length > 0) {
+            aEncOut->data = mpp_calloc(RK_U8, MPP_ALIGN(length + 16, SZ_4K));
+            if (aEncOut->data)
+                memcpy(aEncOut->data, src + offset, length);
+        }
         aEncOut->size = (RK_S32)length;
         aEncOut->timeUs = pts;
         aEncOut->keyFrame = (flag & MPP_PACKET_FLAG_INTRA) ? (1) : (0);
@@ -1383,6 +1330,9 @@ RK_S32 VpuApiLegacy::control(VpuCodecContext *ctx, VPU_API_CMD cmd, void *param)
 
     MpiCmd mpicmd = MPI_CMD_BUTT;
     switch (cmd) {
+    case VPU_API_ENABLE_DEINTERLACE : {
+        mpicmd = MPP_DEC_SET_ENABLE_DEINTERLACE;
+    } break;
     case VPU_API_ENC_SETCFG : {
         MppCodingType coding = (MppCodingType)ctx->videoCoding;
 
@@ -1405,7 +1355,7 @@ RK_S32 VpuApiLegacy::control(VpuCodecContext *ctx, VPU_API_CMD cmd, void *param)
         mpicmd = MPP_DEC_SET_EXT_BUF_GROUP;
     } break;
     case VPU_API_USE_PRESENT_TIME_ORDER: {
-        mpicmd = MPP_DEC_SET_INTERNAL_PTS_ENABLE;
+        mpicmd = MPP_DEC_SET_PRESENT_TIME_ORDER;
     } break;
     case VPU_API_SET_INFO_CHANGE: {
         mpicmd = MPP_DEC_SET_INFO_CHANGE_READY;
@@ -1420,7 +1370,19 @@ RK_S32 VpuApiLegacy::control(VpuCodecContext *ctx, VPU_API_CMD cmd, void *param)
         mpicmd = MPP_DEC_GET_VPUMEM_USED_COUNT;
     } break;
     case VPU_API_SET_OUTPUT_BLOCK: {
-        mpicmd = MPP_SET_OUTPUT_BLOCK;
+        mpicmd = MPP_SET_OUTPUT_TIMEOUT;
+        if (param) {
+            RK_S32 timeout = *((RK_S32*)param);
+
+            if (timeout) {
+                if (timeout < 0)
+                    mpp_log("set output mode to block\n");
+                else
+                    mpp_log("set output timeout %d ms\n", timeout);
+            } else {
+                mpp_log("set output mode to non-block\n");
+            }
+        }
     } break;
     case VPU_API_GET_EOS_STATUS: {
         *((RK_S32 *)param) = mEosSet;
@@ -1429,6 +1391,21 @@ RK_S32 VpuApiLegacy::control(VpuCodecContext *ctx, VPU_API_CMD cmd, void *param)
     case VPU_API_GET_FRAME_INFO: {
         *((VPU_GENERIC *)param) = vpug;
         mpicmd = MPI_CMD_BUTT;
+    } break;
+    case VPU_API_SET_IMMEDIATE_OUT: {
+        mpicmd = MPP_DEC_SET_IMMEDIATE_OUT;
+    } break;
+    case VPU_API_ENC_SET_VEPU22_CFG: {
+        mpicmd = MPP_ENC_SET_CODEC_CFG;
+    } break;
+    case VPU_API_ENC_GET_VEPU22_CFG: {
+        mpicmd = MPP_ENC_GET_CODEC_CFG;
+    } break;
+    case VPU_API_ENC_SET_VEPU22_CTU_QP: {
+        mpicmd = MPP_ENC_SET_CTU_QP;
+    } break;
+    case VPU_API_ENC_SET_VEPU22_ROI: {
+        mpicmd = MPP_ENC_SET_ROI_CFG;
     } break;
     default: {
     } break;

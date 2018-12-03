@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef __MPP_IMPL_H__
-#define __MPP_IMPL_H__
+#ifndef __MPI_IMPL_H__
+#define __MPI_IMPL_H__
 
 #include "mpp.h"
 
@@ -37,15 +37,6 @@ struct MpiImpl_t {
     Mpp             *ctx;
 };
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 extern RK_U32 mpi_debug;
-void get_mpi_debug();
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /*__MPP_IMPL_H__*/
+#endif /*__MPI_IMPL_H__*/

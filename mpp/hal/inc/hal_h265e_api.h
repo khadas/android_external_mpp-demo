@@ -14,18 +14,19 @@
  * limitations under the License.
  */
 
-#define MODULE_TAG "mpi"
+#ifndef __HAL_H265E_API_H__
+#define __HAL_H265E_API_H__
 
-#include "rk_mpi.h"
-#include "mpp_log.h"
-#include "mpp_env.h"
-#include "mpi_impl.h"
+#include "mpp_hal.h"
 
-RK_U32 mpi_debug = 0;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-void get_mpi_debug()
-{
-    mpp_env_get_u32("mpi_debug", &mpi_debug, 0);
-    mpp_env_get_u32("mpp_debug", &mpp_debug, 0);
+extern const MppHalApi hal_api_h265e;
+
+#ifdef __cplusplus
 }
+#endif
 
+#endif /*__HAL_H265E_API_H__*/

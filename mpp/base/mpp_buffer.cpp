@@ -34,7 +34,8 @@ MPP_RET mpp_buffer_import_with_tag(MppBufferGroup group, MppBufferInfo *info, Mp
 
     if (p) {
         // if group is specified we need to check the parameter
-        if (p->type != info->type || p->type >= MPP_BUFFER_TYPE_BUTT ||
+        if ((p->type & MPP_BUFFER_TYPE_MASK) != info->type ||
+            (p->type & MPP_BUFFER_TYPE_MASK) >= MPP_BUFFER_TYPE_BUTT ||
             p->mode != MPP_BUFFER_EXTERNAL) {
             mpp_err("mpp_buffer_commit invalid type found group %d info %d group mode %d\n",
                     p->type, info->type, p->mode);
@@ -187,12 +188,9 @@ int mpp_buffer_get_fd_with_caller(MppBuffer buffer, const char *caller)
 
     MppBufferImpl *p = (MppBufferImpl*)buffer;
     int fd = p->info.fd;
-
-#ifdef RKPLATFORM
     mpp_assert(fd >= 0);
     if (fd < 0)
         mpp_err("mpp_buffer_get_fd buffer %p fd %d caller %s\n", buffer, fd, caller);
-#endif
 
     return fd;
 }
@@ -259,7 +257,7 @@ MPP_RET mpp_buffer_group_get(MppBufferGroup *group, MppBufferType type, MppBuffe
 {
     if (NULL == group ||
         mode >= MPP_BUFFER_MODE_BUTT ||
-        type >= MPP_BUFFER_TYPE_BUTT) {
+        (type & MPP_BUFFER_TYPE_MASK) >= MPP_BUFFER_TYPE_BUTT) {
         mpp_err_f("input invalid group %p mode %d type %d\n",
                   group, mode, type);
         return MPP_ERR_UNKNOW;
@@ -296,7 +294,28 @@ RK_S32  mpp_buffer_group_unused(MppBufferGroup group)
     }
 
     MppBufferGroupImpl *p = (MppBufferGroupImpl *)group;
-    return (p->mode == MPP_BUFFER_INTERNAL ? 1 : p->count_unused);
+    RK_S32 unused = 0;
+
+    if (p->mode == MPP_BUFFER_INTERNAL) {
+        if (p->limit_count)
+            unused = p->limit_count - p->count_used;
+        else
+            unused = 3; /* NOTE: 3 for 1 decoding 2 deinterlace buffer */
+    } else
+        unused = p->count_unused;
+
+    return unused;
+}
+
+size_t mpp_buffer_group_usage(MppBufferGroup group)
+{
+    if (NULL == group) {
+        mpp_err_f("input invalid group %p\n", group);
+        return MPP_BUFFER_MODE_BUTT;
+    }
+
+    MppBufferGroupImpl *p = (MppBufferGroupImpl *)group;
+    return p->usage;
 }
 
 MppBufferMode mpp_buffer_group_mode(MppBufferGroup group)

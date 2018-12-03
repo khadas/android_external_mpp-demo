@@ -52,7 +52,6 @@ MPP_RET vp9d_init(void *ctx, ParserCfg *init)
     if ((ret = vp9d_parser_init(vp9_ctx, init)) != MPP_OK)
         goto _err_exit;
 
-    vp9_ctx->notify_cb = init->notify_cb;
     if ((ret = vp9d_split_init(vp9_ctx)) != MPP_OK)
         goto _err_exit;
 
@@ -172,11 +171,12 @@ MPP_RET vp9d_prepare(void *ctx, MppPacket pkt, HalDecTask *task)
     length = (RK_S32)mpp_packet_get_length(pkt);
 
     consumed = vp9d_split_frame(ps, &out_data, &out_size, buf, length);
-    pos += consumed;
-    mpp_packet_set_pos(pkt, pos);
+    pos += (consumed >= 0) ? consumed : length;
 
-    vp9d_get_frame_stream(vp9_ctx, out_data, out_size);
+    mpp_packet_set_pos(pkt, pos);
+    vp9d_dbg(VP9D_DBG_STRMIN, "pkt_len=%d, pts=%lld\n", length, pts);
     if (out_size > 0) {
+        vp9d_get_frame_stream(vp9_ctx, out_data, out_size);
         task->input_packet = vp9_ctx->pkt;
         task->valid = 1;
         mpp_packet_set_pts(vp9_ctx->pkt, pts);
@@ -231,17 +231,17 @@ MPP_RET vp9d_callback(void *decoder, void *info)
 */
 
 const ParserApi api_vp9d_parser = {
-    "vp9d_parse",
-    MPP_VIDEO_CodingVP9,
-    sizeof(Vp9CodecContext),
-    0,
-    vp9d_init,
-    vp9d_deinit,
-    vp9d_prepare,
-    vp9d_parse,
-    vp9d_reset,
-    vp9d_flush,
-    vp9d_control,
-    vp9d_callback,
+    .name = "vp9d_parse",
+    .coding = MPP_VIDEO_CodingVP9,
+    .ctx_size = sizeof(Vp9CodecContext),
+    .flag = 0,
+    .init = vp9d_init,
+    .deinit = vp9d_deinit,
+    .prepare = vp9d_prepare,
+    .parse = vp9d_parse,
+    .reset = vp9d_reset,
+    .flush = vp9d_flush,
+    .control = vp9d_control,
+    .callback = vp9d_callback,
 };
 

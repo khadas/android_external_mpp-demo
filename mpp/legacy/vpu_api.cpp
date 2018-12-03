@@ -17,10 +17,8 @@
 #define MODULE_TAG "vpu_api"
 
 #include <string.h>
-#ifdef RKPLATFORM
 #include <dlfcn.h>
 #include <unistd.h>
-#endif
 
 #include "mpp_log.h"
 #include "mpp_mem.h"
@@ -198,8 +196,8 @@ vpu_api_control(VpuCodecContext *ctx, VPU_API_CMD cmdType, void *param)
     return api->control(ctx, cmdType, param);
 }
 
-#ifdef RKPLATFORM
 static const char *codec_paths[] = {
+    "/vendor/lib/librk_vpuapi.so",
     "/system/lib/librk_vpuapi.so",
     "/system/lib/librk_on2.so",
     "/usr/lib/librk_codec.so",
@@ -228,16 +226,14 @@ public:
                               dlsym(rkapi_hdl, "vpu_open_context");
             rkvpu_close_cxt = (RK_S32 (*)(VpuCodecContext **ctx))
                               dlsym(rkapi_hdl, "vpu_close_context");
-            mpp_log("dlopen vpu lib success\n");
-        } else {
-            mpp_err("dlopen vpu lib failed\n");
+            mpp_log("dlopen vpu lib %s success\n", codec_paths[i]);
         }
     }
 
     ~VpulibDlsym() {
         if (rkapi_hdl) {
             dlclose(rkapi_hdl);
-            mpp_log("dlclose vpu lib");
+            rkapi_hdl = NULL;
         }
     }
 };
@@ -264,24 +260,6 @@ static RK_S32 close_orign_vpu(VpuCodecContext **ctx)
     }
     return MPP_NOK;
 }
-#else
-RK_S32 check_orign_vpu()
-{
-    return (MPP_NOK);
-}
-
-RK_S32 open_orign_vpu(VpuCodecContext **ctx)
-{
-    (void)ctx;
-    return MPP_NOK;
-}
-
-RK_S32 close_orign_vpu(VpuCodecContext **ctx)
-{
-    (void)ctx;
-    return MPP_NOK;
-}
-#endif
 
 /*
  * old libvpu path will input a NULL pointer in *ctx
@@ -304,19 +282,15 @@ RK_S32 vpu_open_context(VpuCodecContext **ctx)
     EXtraCfg_t extra_cfg;
     memset(&extra_cfg, 0, sizeof(EXtraCfg_t));
 
+    mpp_env_get_u32("vpu_api_debug", &vpu_api_debug, 0);
     vpu_api_dbg_func("enter\n");
 
     mpp_env_get_u32("use_original", &force_original, 0);
     mpp_env_get_u32("use_mpp_mode", &force_mpp_mode, 0);
 
-#ifdef RKPLATFORM
     /* if there is no original vpuapi library force to mpp path */
     if (check_orign_vpu())
         force_mpp_mode = 1;
-#else
-    /* simulation mode force mpp path */
-    force_mpp_mode = 1;
-#endif
 
     if (force_original) {
         /* force mpp mode here */
@@ -342,7 +316,7 @@ RK_S32 vpu_open_context(VpuCodecContext **ctx)
         if (s->videoCoding == OMX_RK_VIDEO_CodingAVC
             && s->codecType == CODEC_DECODER && s->width <= 1920
             && s->height <= 1088 && !s->extra_cfg.mpp_mode
-            && !strncmp(mpp_get_soc_name(), "rk3399", 6)) {
+            && strncmp(mpp_get_soc_name(), "rk3399", 6)) {
             /* H.264 smaller than 1080p use original vpuapi library for better error process */
             // NOTE: rk3399 need better performance
             use_mpp = 0;
@@ -408,6 +382,10 @@ RK_S32 vpu_open_context(VpuCodecContext **ctx)
                 s->decode_getframe = vpu_api_getframe;
                 s->encoder_sendframe = vpu_api_sendframe;
                 s->encoder_getstream = vpu_api_getstream;
+
+                s->extra_cfg.ori_vpu = 0;
+                extra_cfg.ori_vpu = 0;
+
                 ret = 0;
             } else {
                 mpp_err("Vpu api object has not been properly allocated");

@@ -75,10 +75,18 @@ typedef enum {
 
     MPP_CMD_BASE                        = CMD_MODULE_MPP,
     MPP_ENABLE_DEINTERLACE,
-    MPP_SET_INPUT_BLOCK,
-    MPP_SET_INTPUT_BLOCK_TIMEOUT,
-    MPP_SET_OUTPUT_BLOCK,
-    MPP_SET_OUTPUT_BLOCK_TIMEOUT,
+    MPP_SET_INPUT_BLOCK,                /* deprecated */
+    MPP_SET_INTPUT_BLOCK_TIMEOUT,       /* deprecated */
+    MPP_SET_OUTPUT_BLOCK,               /* deprecated */
+    MPP_SET_OUTPUT_BLOCK_TIMEOUT,       /* deprecated */
+    /*
+     * timeout setup, refer to  MPP_TIMEOUT_XXX
+     * zero     - non block
+     * negative - block with no timeout
+     * positive - timeout in milisecond
+     */
+    MPP_SET_INPUT_TIMEOUT,              /* parameter type RK_S64 */
+    MPP_SET_OUTPUT_TIMEOUT,             /* parameter type RK_S64 */
     MPP_CMD_END,
 
     MPP_CODEC_CMD_BASE                  = CMD_MODULE_CODEC,
@@ -89,7 +97,7 @@ typedef enum {
     MPP_DEC_SET_FRAME_INFO,             /* vpu api legacy control for buffer slot dimension init */
     MPP_DEC_SET_EXT_BUF_GROUP,          /* IMPORTANT: set external buffer group to mpp decoder */
     MPP_DEC_SET_INFO_CHANGE_READY,
-    MPP_DEC_SET_INTERNAL_PTS_ENABLE,
+    MPP_DEC_SET_PRESENT_TIME_ORDER,     /* use input time order for output */
     MPP_DEC_SET_PARSER_SPLIT_MODE,      /* Need to setup before init */
     MPP_DEC_SET_PARSER_FAST_MODE,       /* Need to setup before init */
     MPP_DEC_GET_STREAM_COUNT,
@@ -97,6 +105,8 @@ typedef enum {
     MPP_DEC_SET_VC1_EXTRA_DATA,
     MPP_DEC_SET_OUTPUT_FORMAT,
     MPP_DEC_SET_DISABLE_ERROR,          /* When set it will disable sw/hw error (H.264 / H.265) */
+    MPP_DEC_SET_IMMEDIATE_OUT,
+    MPP_DEC_SET_ENABLE_DEINTERLACE,     /* MPP enable deinterlace by default. Vpuapi can disable it */
     MPP_DEC_CMD_END,
 
     MPP_ENC_CMD_BASE                    = CMD_MODULE_CODEC | CMD_CTX_ID_ENC,
@@ -121,6 +131,7 @@ typedef enum {
     MPP_ENC_PRE_ALLOC_BUFF,             /* allocate buffers before encoding */
     MPP_ENC_SET_QP_RANGE,               /* used for adjusting qp range, the parameter can be 1 or 2 */
     MPP_ENC_SET_ROI_CFG,                /* set MppEncROICfg structure */
+    MPP_ENC_SET_CTU_QP,                 /* for H265 Encoder,set CTU's size and QP */
     MPP_ENC_CMD_END,
 
     MPP_ISP_CMD_BASE                    = CMD_MODULE_CODEC | CMD_CTX_ID_ISP,
@@ -801,6 +812,77 @@ typedef struct MppEncH264Cfg_t {
     MppEncH264RefCfg    ref;
 } MppEncH264Cfg;
 
+
+#define H265E_MAX_ROI_NUMBER  64
+typedef struct H265eRect_t {
+    RK_S32 left;
+    RK_S32 right;
+    RK_S32 top;
+    RK_S32 bottom;
+} H265eRect;
+
+typedef struct H265eRoi_Region_t {
+    RK_U8 level;
+    H265eRect rect;
+} H265eRoiRegion;
+
+/*
+ * roi region only can be setting when rc_enable = 1
+ */
+typedef struct MppEncH265RoiCfg_t {
+    /*
+     * the value is defined by H265eCtuMethod
+     */
+
+    RK_U8 method;
+    /*
+     * the number of roi,the value must less than H265E_MAX_ROI_NUMBER
+     */
+    RK_S32 num;
+
+    /* delat qp using in roi region*/
+    RK_U32 delta_qp;
+
+    /* roi region */
+    H265eRoiRegion region[H265E_MAX_ROI_NUMBER];
+} MppEncH265RoiCfg;
+
+typedef struct H265eCtuQp_t {
+    /* the qp value using in ctu region */
+    RK_U32 qp;
+
+    /*
+     * define the ctu region
+     * method = H265E_METHOD_CUT_SIZE, the value of rect is in ctu size
+     * method = H264E_METHOD_COORDINATE,the value of rect is in coordinates
+     */
+    H265eRect rect;
+} H265eCtu;
+
+typedef struct H265eCtuRegion_t {
+    /*
+     * the value is defined by H265eCtuMethod
+     */
+    RK_U8 method;
+
+    /*
+     * the number of ctu,the value must less than H265E_MAX_ROI_NUMBER
+     */
+    RK_S32 num;
+
+    /* ctu region */
+    H265eCtu ctu[H265E_MAX_ROI_NUMBER];
+} MppEncH265CtuCfg;
+
+/*
+ * define the method when set CTU/ROI parameters
+ * this value is using by method in H265eCtuRegion or H265eRoi struct
+ */
+typedef enum {
+    H265E_METHOD_CTU_SIZE,
+    H264E_METHOD_COORDINATE,
+} H265eCtuMethod;
+
 /*
  * H.265 configurable parameter
  */
@@ -816,6 +898,23 @@ typedef struct MppEncH265VuiCfg_t {
 typedef struct MppEncH265SeiCfg_t {
     RK_U32              change;
 } MppEncH265SeiCfg;
+
+
+typedef enum MppEncH265CfgChange_e {
+    /* change on stream type */
+    MPP_ENC_H265_CFG_PROFILE_LEVEL_TILER_CHANGE  = (1 << 0),
+    MPP_ENC_H265_CFG_INTRA_QP_CHANGE             = (1 << 1),
+    MPP_ENC_H265_CFG_FRAME_RATE_CHANGE           = (1 << 2),
+    MPP_ENC_H265_CFG_BITRATE_CHANGE              = (1 << 3),
+    MPP_ENC_H265_CFG_GOP_SIZE                    = (1 << 4),
+    MPP_ENC_H265_CFG_RC_QP_CHANGE                = (1 << 5),
+    MPP_ENC_H265_CFG_INTRA_REFRESH_CHANGE        = (1 << 6),
+    MPP_ENC_H265_CFG_INDEPEND_SLICE_CHANGE       = (1 << 7),
+    MPP_ENC_H265_CFG_DEPEND_SLICE_CHANGE         = (1 << 8),
+    MPP_ENC_H265_CFG_CTU_CHANGE                  = (1 << 9),
+    MPP_ENC_H265_CFG_ROI_CHANGE                  = (1 << 10),
+    MPP_ENC_H265_CFG_CHANGE_ALL                  = (0xFFFFFFFF),
+} MppEncH265CfgChange;
 
 typedef struct MppEncH265Cfg_t {
     RK_U32              change;
@@ -835,6 +934,8 @@ typedef struct MppEncH265Cfg_t {
     RK_S32              max_qp;
     RK_S32              min_qp;
     RK_S32              max_delta_qp;
+    RK_S32              intra_qp;
+    RK_S32              gop_delta_qp;
 
     /* intra fresh config */
     RK_S32              intra_refresh_mode;
@@ -849,6 +950,9 @@ typedef struct MppEncH265Cfg_t {
     /* extra info */
     MppEncH265VuiCfg    vui;
     MppEncH265SeiCfg    sei;
+
+    MppEncH265CtuCfg    ctu;
+    MppEncH265RoiCfg    roi;
 } MppEncH265Cfg;
 
 /*

@@ -192,6 +192,10 @@ void *mpp_enc_control_thread(void *data)
              * mpp_task may be null if output port is awaken by Mpp::clear()
              */
             if (mpp_task) {
+                //set motion info buffer to output task
+                if (mv_info)
+                    mpp_task_meta_set_buffer(mpp_task, KEY_MOTION_INFO, mv_info);
+
                 mpp_task_meta_set_packet(mpp_task, KEY_OUTPUT_PACKET, packet);
 
                 {
@@ -218,69 +222,6 @@ void *mpp_enc_control_thread(void *data)
     // clear remain task in output port
     release_task_in_port(input);
     release_task_in_port(mpp->mOutputPort);
-
-    return NULL;
-}
-
-void *mpp_enc_hal_thread(void *data)
-{
-    Mpp *mpp = (Mpp*)data;
-    MppThread *hal      = mpp->mThreadHal;
-    mpp_list *frames    = mpp->mFrames;
-    mpp_list *tasks     = mpp->mTasks;
-
-    while (MPP_THREAD_RUNNING == hal->get_status()) {
-        /*
-         * hal thread wait for dxva interface intput firt
-         */
-        hal->lock();
-        if (0 == tasks->list_size())
-            hal->wait();
-        hal->unlock();
-
-        // get_config
-        // register genertation
-        if (tasks->list_size()) {
-            HalDecTask *task;
-            tasks->lock();
-            tasks->del_at_head(&task, sizeof(task));
-            mpp->mTaskGetCount++;
-            tasks->unlock();
-
-            // hal->mpp_hal_reg_gen(current);
-
-            /*
-             * wait previous register set done
-             */
-            // hal->mpp_hal_hw_wait(previous);
-
-            /*
-             * send current register set to hardware
-             */
-            // hal->mpp_hal_hw_start(current);
-
-            /*
-             * mark previous buffer is complete
-             */
-            // change dpb slot status
-            // signal()
-            // mark frame in output queue
-            // wait up output thread to get a output frame
-
-            // for test
-            MppBuffer buffer;
-            mpp_buffer_get(mpp->mFrameGroup, &buffer, SZ_1M);
-
-            MppFrame frame;
-            mpp_frame_init(&frame);
-            mpp_frame_set_buffer(frame, buffer);
-            frames->lock();
-            frames->add_at_tail(&frame, sizeof(frame));
-            mpp->mFramePutCount++;
-            frames->signal();
-            frames->unlock();
-        }
-    }
 
     return NULL;
 }
@@ -325,15 +266,12 @@ MPP_RET mpp_enc_init(MppEnc **enc, MppCodingType coding)
         }
 
         mpp_buf_slot_setup(packet_slots, task_count);
-        cb.callBack = mpp_enc_notify;
-        cb.opaque = p;
 
         ControllerCfg ctrl_cfg = {
             coding,
             &p->cfg,
             &p->set,
             task_count,
-            cb,
         };
 
         ret = controller_init(&controller, &ctrl_cfg);
@@ -418,11 +356,11 @@ MPP_RET mpp_enc_reset(MppEnc *enc)
     return MPP_OK;
 }
 
-MPP_RET mpp_enc_notify(void *ctx, void *info)
+MPP_RET mpp_enc_notify(MppEnc *enc, RK_U32 flag)
 {
     // TODO
-    (void)ctx;
-    (void)info;
+    (void)enc;
+    (void)flag;
     return MPP_OK;
 }
 
@@ -539,6 +477,10 @@ MPP_RET mpp_enc_control(MppEnc *enc, MpiCmd cmd, void *param)
     } break;
     case MPP_ENC_SET_QP_RANGE : {
         mpp_enc_dbg_ctrl("set qp range\n");
+        ret = mpp_hal_control(enc->hal, cmd, param);
+    } break;
+    case MPP_ENC_SET_CTU_QP: {
+        mpp_enc_dbg_ctrl("set ctu qp\n");
         ret = mpp_hal_control(enc->hal, cmd, param);
     } break;
     default : {

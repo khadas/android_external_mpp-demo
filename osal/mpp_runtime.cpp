@@ -70,33 +70,28 @@ public:
 
 RK_U32 MppRuntimeService::get_allocator_valid(MppBufferType type)
 {
-    return (type < MPP_BUFFER_TYPE_BUTT) ? allocator_valid[type] : (0);
+    MppBufferType buffer_type = (MppBufferType)(type & MPP_BUFFER_TYPE_MASK);
+    return (buffer_type < MPP_BUFFER_TYPE_BUTT) ? allocator_valid[buffer_type] : (0);
 };
 
 MppRuntimeService::MppRuntimeService()
 {
-    int fd = -1;
     allocator_valid[MPP_BUFFER_TYPE_NORMAL] = 1;
-    allocator_valid[MPP_BUFFER_TYPE_V4L2] = 0;
 
-    fd = open("/dev/ion", O_RDWR);
-    if (fd < 0) {
+    if (access("/dev/ion", F_OK | R_OK | W_OK)) {
         allocator_valid[MPP_BUFFER_TYPE_ION] = 0;
         mpp_log("NOT found ion allocator\n");
     } else {
         allocator_valid[MPP_BUFFER_TYPE_ION] = 1;
         mpp_log("found ion allocator\n");
-        close(fd);
     }
 
-    fd = open("/dev/dri/card0", O_RDWR);
-    if (fd < 0) {
+    if (access("/dev/dri/card0", F_OK | R_OK | W_OK)) {
         allocator_valid[MPP_BUFFER_TYPE_DRM] = 0;
         mpp_log("NOT found drm allocator\n");
     } else {
         allocator_valid[MPP_BUFFER_TYPE_DRM] = 1;
         mpp_log("found drm allocator\n");
-        close(fd);
     }
 
     // If both ion and drm is enabled detect allocator in dts to choose one
@@ -125,10 +120,15 @@ MppRuntimeService::MppRuntimeService()
                         RK_S32 val = 0;
                         FILE *fp = fopen(path, "rb");
                         if (fp) {
-                            fread(&val, 1, 4, fp);
+                            size_t len = fread(&val, 1, 4, fp);
                             // zero for ion non-zero for drm ->
                             // zero     - disable drm
                             // non-zero - disable ion
+                            if (len != 4) {
+                                mpp_err("failed to read dts allocator value default 0\n");
+                                val = 0;
+                            }
+
                             if (val == 0) {
                                 allocator_valid[MPP_BUFFER_TYPE_DRM] = 0;
                                 mpp_log("found ion allocator in dts\n");

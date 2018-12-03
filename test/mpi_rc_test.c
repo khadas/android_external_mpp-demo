@@ -107,141 +107,6 @@ static OptionInfo mpi_rc_cmd[] = {
     {"c",               "rc test item",         "rc test item flags, one bit each item: roi|force_intra|gop|fps|bps"},
 };
 
-static MPP_RET mpi_rc_read_yuv_image(RK_U8 *buf, MppEncPrepCfg *prep_cfg, FILE *fp)
-{
-    MPP_RET ret = MPP_OK;
-    RK_U32 read_size;
-    RK_U32 row = 0;
-    RK_U32 width        = prep_cfg->width;
-    RK_U32 height       = prep_cfg->height;
-    RK_U32 hor_stride   = prep_cfg->hor_stride;
-    RK_U32 ver_stride   = prep_cfg->ver_stride;
-    MppFrameFormat fmt  = prep_cfg->format;
-    RK_U8 *buf_y = buf;
-    RK_U8 *buf_u = buf_y + hor_stride * ver_stride; // NOTE: diff from gen_yuv_image
-    RK_U8 *buf_v = buf_u + hor_stride * ver_stride / 4; // NOTE: diff from gen_yuv_image
-
-    switch (fmt) {
-    case MPP_FMT_YUV420SP : {
-        for (row = 0; row < height; row++) {
-            read_size = fread(buf_y + row * hor_stride, 1, width, fp);
-            if (read_size != width) {
-                mpp_err_f("read ori yuv file luma failed");
-                ret  = MPP_NOK;
-                goto err;
-            }
-        }
-
-        for (row = 0; row < height / 2; row++) {
-            read_size = fread(buf_u + row * hor_stride, 1, width, fp);
-            if (read_size != width) {
-                mpp_err_f("read ori yuv file cb failed");
-                ret  = MPP_NOK;
-                goto err;
-            }
-        }
-    } break;
-    case MPP_FMT_YUV420P : {
-        for (row = 0; row < height; row++) {
-            read_size = fread(buf_y + row * hor_stride, 1, width, fp);
-            if (read_size != width) {
-                mpp_err_f("read ori yuv file luma failed");
-                ret  = MPP_NOK;
-                goto err;
-            }
-        }
-
-        for (row = 0; row < height / 2; row++) {
-            read_size = fread(buf_u + row * hor_stride / 2, 1, width / 2, fp);
-            if (read_size != width / 2) {
-                mpp_err_f("read ori yuv file cb failed");
-                ret  = MPP_NOK;
-                goto err;
-            }
-        }
-
-        for (row = 0; row < height / 2; row++) {
-            read_size = fread(buf_v + row * hor_stride / 2, 1, width / 2, fp);
-            if (read_size != width / 2) {
-                mpp_err_f("read ori yuv file cr failed");
-                ret  = MPP_NOK;
-                goto err;
-            }
-        }
-    } break;
-    default : {
-        mpp_err_f("read image do not support fmt %d\n", fmt);
-        ret = MPP_NOK;
-    } break;
-    }
-
-err:
-
-    return ret;
-}
-
-static MPP_RET gen_yuv_image(RK_U8 *buf, MppEncPrepCfg *prep_cfg, RK_U32 frame_count)
-{
-    MPP_RET ret = MPP_OK;
-    RK_U32 width        = prep_cfg->width;
-    RK_U32 height       = prep_cfg->height;
-    RK_U32 hor_stride   = prep_cfg->hor_stride;
-    RK_U32 ver_stride   = prep_cfg->ver_stride;
-    MppFrameFormat fmt  = prep_cfg->format;
-    RK_U8 *buf_y = buf;
-    RK_U8 *buf_c = buf + hor_stride * ver_stride;
-    RK_U32 x, y;
-
-    switch (fmt) {
-    case MPP_FMT_YUV420SP : {
-        RK_U8 *p = buf_y;
-
-        for (y = 0; y < height; y++, p += hor_stride) {
-            for (x = 0; x < width; x++) {
-                p[x] = x + y + frame_count * 3;
-            }
-        }
-
-        p = buf_c;
-        for (y = 0; y < height / 2; y++, p += hor_stride) {
-            for (x = 0; x < width / 2; x++) {
-                p[x * 2 + 0] = 128 + y + frame_count * 2;
-                p[x * 2 + 1] = 64  + x + frame_count * 5;
-            }
-        }
-    } break;
-    case MPP_FMT_YUV420P : {
-        RK_U8 *p = buf_y;
-
-        for (y = 0; y < height; y++, p += hor_stride) {
-            for (x = 0; x < width; x++) {
-                p[x] = x + y + frame_count * 3;
-            }
-        }
-
-        p = buf_c;
-        for (y = 0; y < height / 2; y++, p += hor_stride / 2) {
-            for (x = 0; x < width / 2; x++) {
-                p[x] = 128 + y + frame_count * 2;
-            }
-        }
-
-        p = buf_c + hor_stride * ver_stride / 4;
-        for (y = 0; y < height / 2; y++, p += hor_stride / 2) {
-            for (x = 0; x < width / 2; x++) {
-                p[x] = 64 + x + frame_count * 5;
-            }
-        }
-    } break;
-    default : {
-        mpp_err_f("filling function do not support type %d\n", fmt);
-        ret = MPP_NOK;
-    } break;
-    }
-
-    return ret;
-}
-
 static void mpi_rc_deinit(MpiRcTestCtx *ctx)
 {
     MpiRcFile *file = &ctx->file;
@@ -552,8 +417,7 @@ static MPP_RET mpi_rc_codec(MpiRcTestCtx *ctx)
     FILE *fp_stat           = file->fp_stat;
     RK_U8 *dec_in_buf       = NULL;
     RK_U32 need_split       = 0;
-    RK_U32 block_input      = 0;
-    RK_U32 block_output     = 0;
+    MppPollType block       = MPP_POLL_NON_BLOCK;
 
     // base flow context
     MppCtx enc_ctx          = NULL;
@@ -649,16 +513,18 @@ static MPP_RET mpi_rc_codec(MpiRcTestCtx *ctx)
         mpp_err("dec_mpi->control failed\n");
         goto MPP_TEST_OUT;
     }
-    block_input = 0;
-    block_output = 1;
-    ret = dec_mpi->control(dec_ctx, MPP_SET_INPUT_BLOCK, (MppParam)&block_input);
+
+    block = MPP_POLL_NON_BLOCK;
+    ret = dec_mpi->control(dec_ctx, MPP_SET_INPUT_TIMEOUT, (MppParam)&block);
     if (MPP_OK != ret) {
-        mpp_err("dec_mpi->control dec MPP_SET_INPUT_BLOCK failed\n");
+        mpp_err("dec_mpi->control dec MPP_SET_INPUT_TIMEOUT failed\n");
         goto MPP_TEST_OUT;
     }
-    ret = dec_mpi->control(dec_ctx, MPP_SET_OUTPUT_BLOCK, (MppParam)&block_output);
+
+    block = MPP_POLL_BLOCK;
+    ret = dec_mpi->control(dec_ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&block);
     if (MPP_OK != ret) {
-        mpp_err("dec_mpi->control MPP_SET_OUTPUT_BLOCK failed\n");
+        mpp_err("dec_mpi->control MPP_SET_OUTPUT_TIMEOUT failed\n");
         goto MPP_TEST_OUT;
     }
 
@@ -687,16 +553,17 @@ static MPP_RET mpi_rc_codec(MpiRcTestCtx *ctx)
         mpp_err("mpp_create encoder failed\n");
         goto MPP_TEST_OUT;
     }
-    block_input = 0;
-    block_output = 0;
-    ret = enc_mpi->control(enc_ctx, MPP_SET_INPUT_BLOCK, (MppParam)&block_input);
+
+    block = MPP_POLL_NON_BLOCK;
+    ret = enc_mpi->control(enc_ctx, MPP_SET_INPUT_TIMEOUT, (MppParam)&block);
     if (MPP_OK != ret) {
-        mpp_err("enc_mpi->control MPP_SET_INPUT_BLOCK failed\n");
+        mpp_err("enc_mpi->control MPP_SET_INPUT_TIMEOUT failed\n");
         goto MPP_TEST_OUT;
     }
-    ret = enc_mpi->control(enc_ctx, MPP_SET_OUTPUT_BLOCK, (MppParam)&block_output);
+
+    ret = enc_mpi->control(enc_ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&block);
     if (MPP_OK != ret) {
-        mpp_err("enc_mpi->control MPP_SET_OUTPUT_BLOCK failed\n");
+        mpp_err("enc_mpi->control MPP_SET_OUTPUT_TIMEOUT failed\n");
         goto MPP_TEST_OUT;
     }
 
@@ -844,13 +711,18 @@ static MPP_RET mpi_rc_codec(MpiRcTestCtx *ctx)
             i = 0;
 
         if (fp_input) {
-            ret = mpi_rc_read_yuv_image(buf, prep_cfg, fp_input);
+            ret = read_yuv_image(buf, fp_input,
+                                 prep_cfg->width, prep_cfg->height,
+                                 prep_cfg->hor_stride, prep_cfg->ver_stride,
+                                 prep_cfg->format);
             if (MPP_OK != ret || feof(fp_input)) {
                 mpp_log("found last frame\n");
                 frm_eos = 1;
             }
         } else {
-            ret = gen_yuv_image(buf, prep_cfg, frame_count);
+            ret = fill_yuv_image(buf, prep_cfg->width, prep_cfg->height,
+                                 prep_cfg->hor_stride, prep_cfg->ver_stride,
+                                 prep_cfg->format, frame_count);
             if (ret)
                 goto MPP_TEST_OUT;
         }

@@ -138,7 +138,7 @@ MPP_RET h264e_deinit(void *ctx)
     while (!list_empty(del)) {
         tmp = del->next;
         list_del_init(tmp);
-        free(list_entry(tmp, RecordNode, list));
+        mpp_free(list_entry(tmp, RecordNode, list));
     }
 
     h264e_dbg_func("leave\n");
@@ -255,7 +255,8 @@ MPP_RET h264e_config(void *ctx, RK_S32 cmd, void *param)
                 ret = MPP_ERR_VALUE;
             }
         }
-
+        p->rc->mb_per_frame = (((p->set->prep.width + 15) & (~15)) >> 4) *
+                              (((p->set->prep.height + 15) & (~15)) >> 4);
         if (!ret) {
             mpp_log_f("MPP_ENC_SET_RC_CFG bps %d [%d : %d]\n",
                       rc->bps_target, rc->bps_min, rc->bps_max);

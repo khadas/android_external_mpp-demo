@@ -161,11 +161,11 @@ RK_S32 vp9d_split_frame(SplitContext_t *ctx,
 #define case_n(a, rd) \
             case a: \
                 while (n_frames--) { \
-                    RK_S32 sz = rd; \
+                    RK_U32 sz = rd; \
                     idx += a; \
-                    if (sz > size) { \
+                    if (sz == 0 || sz > (RK_U32)size) { \
                         s->n_frames = 0; \
-                        *out_size = size; \
+                        *out_size = size > full_size ? full_size : size; \
                         *out_data = data; \
                         mpp_err("Superframe packet size too big: %u > %d\n", \
                                sz, size); \
@@ -377,7 +377,6 @@ MPP_RET vp9d_parser_deinit(Vp9CodecContext *vp9_ctx)
 {
     VP9Context *s = vp9_ctx->priv_data;
     vp9_frame_free(s);
-    mpp_free(s->intra_pred_data[0]);
     mpp_free(s->c_b);
     s->c_b_size = 0;
     MPP_FREE(vp9_ctx->priv_data);
@@ -395,6 +394,7 @@ static RK_S32 vp9_alloc_frame(Vp9CodecContext *ctx, VP9Frame *frame)
     mpp_frame_set_hor_stride(frame->f, ctx->width);
     mpp_frame_set_ver_stride(frame->f, ctx->height);
     mpp_frame_set_errinfo(frame->f, 0);
+    mpp_frame_set_discard(frame->f, 0);
     mpp_frame_set_pts(frame->f, s->pts);
 #if 0
     mpp_frame_set_fmt(frame->frame, s->h265dctx->pix_fmt);
@@ -429,12 +429,8 @@ __BITREAD_ERR:
 static RK_S32 update_size(Vp9CodecContext *ctx, RK_S32 w, RK_S32 h, RK_S32 fmt)
 {
     VP9Context *s = ctx->priv_data;
-    RK_U8 *p;
-    RK_S32 bytesperpixel = s->bytesperpixel;
 
-    //av_assert0(w > 0 && h > 0);
-
-    if (s->intra_pred_data[0] && w == ctx->width && h == ctx->height && ctx->pix_fmt == fmt)
+    if (w == ctx->width && h == ctx->height && ctx->pix_fmt == fmt)
         return 0;
 
     ctx->width   = w;
@@ -445,43 +441,13 @@ static RK_S32 update_size(Vp9CodecContext *ctx, RK_S32 w, RK_S32 h, RK_S32 fmt)
     s->cols      = (w + 7) >> 3;
     s->rows      = (h + 7) >> 3;
 
-#define assign(var, type, n) var = (type) p; p += s->sb_cols * (n) * sizeof(*var)
-    mpp_free(s->intra_pred_data[0]);
-    // FIXME we slightly over-allocate here for subsampled chroma, but a little
-    // bit of padding shouldn't affect performance...
-    p = mpp_malloc(RK_U8, s->sb_cols * (128 + 192 * bytesperpixel +
-                                        sizeof(*s->lflvl) +
-                                        16 * sizeof(*s->above_mv_ctx)));
-    if (!p)
-        return MPP_ERR_NOMEM;
-    assign(s->intra_pred_data[0],  RK_U8 *,             64 * bytesperpixel);
-    assign(s->intra_pred_data[1],  RK_U8 *,             64 * bytesperpixel);
-    assign(s->intra_pred_data[2],  RK_U8 *,             64 * bytesperpixel);
-    assign(s->above_y_nnz_ctx,     RK_U8 *,             16);
-    assign(s->above_mode_ctx,      RK_U8 *,             16);
-    assign(s->above_mv_ctx,        Vpxmv(*)[2],          16);
-    assign(s->above_uv_nnz_ctx[0], RK_U8 *,             16);
-    assign(s->above_uv_nnz_ctx[1], RK_U8 *,             16);
-    assign(s->above_partition_ctx, RK_U8 *,              8);
-    assign(s->above_skip_ctx,      RK_U8 *,              8);
-    assign(s->above_txfm_ctx,      RK_U8 *,              8);
-    assign(s->above_segpred_ctx,   RK_U8 *,              8);
-    assign(s->above_intra_ctx,     RK_U8 *,              8);
-    assign(s->above_comp_ctx,      RK_U8 *,              8);
-    assign(s->above_ref_ctx,       RK_U8 *,              8);
-    assign(s->above_filter_ctx,    RK_U8 *,              8);
-    assign(s->lflvl,               struct VP9Filter *,     1);
-#undef assign
-
     // these will be re-allocated a little later
-
     if (s->bpp != s->last_bpp) {
         s->last_bpp = s->bpp;
     }
 
     return 0;
 }
-
 
 static RK_S32 inv_recenter_nonneg(RK_S32 v, RK_S32 m)
 {
@@ -684,6 +650,13 @@ static RK_S32 decode_parser_header(Vp9CodecContext *ctx,
     s->errorres       = mpp_get_bit1(&s->gb);
     vp9d_dbg(VP9D_DBG_HEADER, "error_resilient_mode %d", s->errorres);
     s->use_last_frame_mvs = !s->errorres && !last_invisible;
+    s->got_keyframes += s->keyframe ? 1 : 0;
+    vp9d_dbg(VP9D_DBG_HEADER, "keyframe=%d, intraonly=%d, got_keyframes=%d\n",
+             s->keyframe, s->intraonly, s->got_keyframes);
+    if (!s->got_keyframes) {
+        mpp_err_f("have not got keyframe.\n");
+        return MPP_ERR_STREAM;
+    }
     if (s->keyframe) {
         if (mpp_get_bits(&s->gb, 24) != VP9_SYNCCODE) { // synccode
             mpp_err("Invalid sync code\n");
@@ -1051,7 +1024,8 @@ static RK_S32 decode_parser_header(Vp9CodecContext *ctx,
         }
     }
 
-    if (s->keyframe || s->errorres || s->intraonly) {
+    if (s->keyframe || s->errorres ||
+        (s->intraonly && s->resetctx == 3)) {
         s->prob_ctx[0].p = s->prob_ctx[1].p = s->prob_ctx[2].p =
                                                   s->prob_ctx[3].p = vp9_default_probs;
         memcpy(s->prob_ctx[0].coef, vp9_default_coef_probs,
@@ -1062,7 +1036,13 @@ static RK_S32 decode_parser_header(Vp9CodecContext *ctx,
                sizeof(vp9_default_coef_probs));
         memcpy(s->prob_ctx[3].coef, vp9_default_coef_probs,
                sizeof(vp9_default_coef_probs));
+    } else if (s->intraonly && s->resetctx == 2) {
+        s->prob_ctx[c].p = vp9_default_probs;
+        memcpy(s->prob_ctx[c].coef, vp9_default_coef_probs,
+               sizeof(vp9_default_coef_probs));
     }
+    if (s->keyframe || s->errorres || s->intraonly)
+        s->framectxid = c = 0;
 
     // next 16 bits is size of the rest of the header (arith-coded)
     size2 = mpp_get_bits(&s->gb, 16);
@@ -1619,20 +1599,25 @@ RK_S32 vp9_parser_frame(Vp9CodecContext *ctx, HalDecTask *task)
 
     vp9d_parser2_syntax(ctx);
 
-
     task->syntax.data = (void*)&ctx->pic_params;
     task->syntax.number = 1;
     task->valid = 1;
     task->output = s->frames[CUR_FRAME].slot_index;
     task->input_packet = ctx->pkt;
+
     for (i = 0; i < 3; i++) {
         if (s->refs[s->refidx[i]].slot_index < 0x7f) {
+            MppFrame mframe = NULL;
             mpp_buf_slot_set_flag(s->slots, s->refs[s->refidx[i]].slot_index, SLOT_HAL_INPUT);
             task->refer[i] = s->refs[s->refidx[i]].slot_index;
+            mpp_buf_slot_get_prop(s->slots, task->refer[i], SLOT_FRAME_PTR, &mframe);
+            if (mframe)
+                task->flags.ref_err |= mpp_frame_get_errinfo(mframe);
         } else {
             task->refer[i] = -1;
         }
     }
+    vp9d_dbg(VP9D_DBG_REF, "ref_errinfo=%d\n", task->flags.ref_err);
     if (s->eos) {
         task->flags.eos = 1;
     }
@@ -1641,7 +1626,8 @@ RK_S32 vp9_parser_frame(Vp9CodecContext *ctx, HalDecTask *task)
         mpp_buf_slot_set_flag(s->slots,  s->frames[CUR_FRAME].slot_index, SLOT_QUEUE_USE);
         mpp_buf_slot_enqueue(s->slots, s->frames[CUR_FRAME].slot_index, QUEUE_DISPLAY);
     }
-    vp9d_dbg(VP9D_DBG_REF, "s->refreshrefmask = %d s->frames[CUR_FRAME] = %d", s->refreshrefmask, s->frames[CUR_FRAME].slot_index);
+    vp9d_dbg(VP9D_DBG_REF, "s->refreshrefmask = %d s->frames[CUR_FRAME] = %d",
+             s->refreshrefmask, s->frames[CUR_FRAME].slot_index);
     for (i = 0; i < 3; i++) {
         if (s->refs[s->refidx[i]].ref != NULL) {
             vp9d_dbg(VP9D_DBG_REF, "ref buf select %d", s->refs[s->refidx[i]].slot_index);
@@ -1672,6 +1658,8 @@ MPP_RET vp9d_paser_reset(Vp9CodecContext *ctx)
     VP9Context *s = ctx->priv_data;
     SplitContext_t *ps = (SplitContext_t *)ctx->priv_data2;
     VP9ParseContext *pc = (VP9ParseContext *)ps->priv_data;
+
+    s->got_keyframes = 0;
     for (i = 0; i < 3; i++) {
         if (s->frames[i].ref) {
             vp9_unref_frame(s, &s->frames[i]);

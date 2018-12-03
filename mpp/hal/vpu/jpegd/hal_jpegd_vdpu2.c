@@ -752,20 +752,20 @@ MPP_RET hal_jpegd_vdpu2_init(void *hal, MppHalCfg *cfg)
     JpegHalCtx->frame_slots = cfg->frame_slots;
 
     //get vpu socket
-#ifdef RKPLATFORM
-    if (JpegHalCtx->vpu_socket <= 0) {
-        JpegHalCtx->vpu_socket = mpp_device_init(&JpegHalCtx->dev_ctx, MPP_CTX_DEC,
-                                                 MPP_VIDEO_CodingMJPEG);
-        if (JpegHalCtx->vpu_socket <= 0) {
-            mpp_err_f("get vpu_socket(%d) <= 0, failed. \n",
-                      JpegHalCtx->vpu_socket);
-            return MPP_ERR_UNKNOW;
-        } else {
-            jpegd_dbg_hal("get vpu_socket(%d), success. \n",
-                          JpegHalCtx->vpu_socket);
-        }
+    MppDevCfg dev_cfg = {
+        .type = MPP_CTX_DEC,              /* type */
+        .coding = MPP_VIDEO_CodingMJPEG,  /* coding */
+        .platform = 0,                    /* platform */
+        .pp_enable = 0,                   /* pp_enable */
+    };
+
+    ret = mpp_device_init(&JpegHalCtx->dev_ctx, &dev_cfg);
+    if (ret) {
+        mpp_err("mpp_device_init failed. ret: %d\n", ret);
+        return ret;
+    } else {
+        jpegd_dbg_hal("mpp_device_init success. \n");
     }
-#endif
 
     //init regs
     JpegdIocRegInfo *info = NULL;
@@ -784,15 +784,9 @@ MPP_RET hal_jpegd_vdpu2_init(void *hal, MppHalCfg *cfg)
 
     //malloc hw buf
     if (JpegHalCtx->group == NULL) {
-#ifdef RKPLATFORM
-        jpegd_dbg_hal("mpp_buffer_group_get_internal used ion in");
         ret = mpp_buffer_group_get_internal(&JpegHalCtx->group,
                                             MPP_BUFFER_TYPE_ION);
-#else
-        ret = mpp_buffer_group_get_internal(&JpegHalCtx->group,
-                                            MPP_BUFFER_TYPE_NORMAL);
-#endif
-        if (MPP_OK != ret) {
+        if (ret) {
             mpp_err_f("mpp_buffer_group_get failed\n");
             return ret;
         }
@@ -800,14 +794,14 @@ MPP_RET hal_jpegd_vdpu2_init(void *hal, MppHalCfg *cfg)
 
     ret = mpp_buffer_get(JpegHalCtx->group, &JpegHalCtx->frame_buf,
                          JPEGD_STREAM_BUFF_SIZE);
-    if (MPP_OK != ret) {
+    if (ret) {
         mpp_err_f("get buffer failed\n");
         return ret;
     }
 
     ret = mpp_buffer_get(JpegHalCtx->group, &JpegHalCtx->pTableBase,
                          JPEGD_BASELINE_TABLE_SIZE);
-    if (MPP_OK != ret) {
+    if (ret) {
         mpp_err_f("get buffer failed\n");
         return ret;
     }
@@ -836,31 +830,32 @@ MPP_RET hal_jpegd_vdpu2_deinit(void *hal)
     MPP_RET ret = MPP_OK;
     JpegdHalCtx *JpegHalCtx = (JpegdHalCtx *)hal;
 
-#ifdef RKPLATFORM
-    if (JpegHalCtx->vpu_socket >= 0) {
-        mpp_device_deinit(JpegHalCtx->vpu_socket);
+    if (JpegHalCtx->dev_ctx) {
+        ret = mpp_device_deinit(JpegHalCtx->dev_ctx);
+        if (ret) {
+            mpp_err("mpp_device_deinit failed. ret: %d\n", ret);
+        }
     }
-#endif
 
     if (JpegHalCtx->frame_buf) {
         ret = mpp_buffer_put(JpegHalCtx->frame_buf);
-        if (MPP_OK != ret) {
-            mpp_err_f("put buffer failed\n");
+        if (ret) {
+            mpp_err_f("put frame buffer failed\n");
             return ret;
         }
     }
 
     if (JpegHalCtx->pTableBase) {
         ret = mpp_buffer_put(JpegHalCtx->pTableBase);
-        if (MPP_OK != ret) {
-            mpp_err_f("put buffer failed\n");
+        if (ret) {
+            mpp_err_f("put table buffer failed\n");
             return ret;
         }
     }
 
     if (JpegHalCtx->group) {
         ret = mpp_buffer_group_put(JpegHalCtx->group);
-        if (MPP_OK != ret) {
+        if (ret) {
             mpp_err_f("group free buffer failed\n");
             return ret;
         }
@@ -891,29 +886,27 @@ MPP_RET hal_jpegd_vdpu2_gen_regs(void *hal,  HalTaskInfo *syn)
     MPP_RET ret = MPP_OK;
     JpegdHalCtx *JpegHalCtx = (JpegdHalCtx *)hal;
     JpegdSyntax *syntax = (JpegdSyntax *)syn->dec.syntax.data;
-#ifdef RKPLATFORM
     MppBuffer streambuf = NULL;
     MppBuffer outputBuf = NULL;
-#endif
 
     if (syn->dec.valid) {
         syn->dec.valid = 0;
-        jpegd_setup_output_fmt(JpegHalCtx, syntax);
+        jpegd_setup_output_fmt(JpegHalCtx, syntax, syn->dec.output);
 
-#ifdef RKPLATFORM
-        if (JpegHalCtx->set_output_fmt_flag && (JpegHalCtx->vpu_socket > 0)) {
-            mpp_device_deinit(JpegHalCtx->vpu_socket);
-            JpegHalCtx->vpu_socket = 0;
-            mpp_device_control(&JpegHalCtx->dev_ctx, MPP_DEV_ENABLE_POSTPROCCESS, NULL);
-            JpegHalCtx->vpu_socket = mpp_device_init(&JpegHalCtx->dev_ctx, MPP_CTX_DEC,
-                                                     MPP_VIDEO_CodingMJPEG);
-            if (JpegHalCtx->vpu_socket <= 0) {
-                mpp_err_f("get vpu_socket(%d) <= 0, failed. \n",
-                          JpegHalCtx->vpu_socket);
-                return MPP_ERR_UNKNOW;
+        if (JpegHalCtx->set_output_fmt_flag && (NULL != JpegHalCtx->dev_ctx)) {
+            mpp_device_deinit(JpegHalCtx->dev_ctx);
+            MppDevCfg dev_cfg = {
+                .type = MPP_CTX_DEC,              /* type */
+                .coding = MPP_VIDEO_CodingMJPEG,  /* coding */
+                .platform = 0,                    /* platform */
+                .pp_enable = 1,                   /* pp_enable */
+            };
+            ret = mpp_device_init(&JpegHalCtx->dev_ctx, &dev_cfg);
+            if (ret) {
+                mpp_err("mpp_device_init failed. ret: %d\n", ret);
+                return ret;
             } else {
-                jpegd_dbg_hal("get vpu_socket(%d), success. \n",
-                              JpegHalCtx->vpu_socket);
+                jpegd_dbg_hal("mpp_device_init success. \n");
             }
         }
 
@@ -926,7 +919,6 @@ MPP_RET hal_jpegd_vdpu2_gen_regs(void *hal,  HalTaskInfo *syn)
         mpp_buf_slot_get_prop(JpegHalCtx->frame_slots, syn->dec.output,
                               SLOT_BUFFER, &outputBuf);
         JpegHalCtx->frame_fd = mpp_buffer_get_fd(outputBuf);
-#endif
 
         jpegd_setup_pp(JpegHalCtx, syntax);
 
@@ -948,17 +940,15 @@ MPP_RET hal_jpegd_vdpu2_start(void *hal, HalTaskInfo *task)
     jpegd_dbg_func("enter\n");
     MPP_RET ret = MPP_OK;
     JpegdHalCtx *JpegHalCtx = (JpegdHalCtx *)hal;
-
-#ifdef RKPLATFORM
     RK_U32 *p_regs = (RK_U32 *)JpegHalCtx->regs;
-    ret = mpp_device_send_reg(JpegHalCtx->vpu_socket, p_regs,
+
+    ret = mpp_device_send_reg(JpegHalCtx->dev_ctx, p_regs,
                               sizeof(JpegdIocRegInfo) / sizeof(RK_U32));
-    if (ret != 0) {
+    if (ret) {
         mpp_err_f("mpp_device_send_reg Failed!!!\n");
         return MPP_ERR_VPUHW;
     }
-#endif
-    (void)JpegHalCtx;
+
     (void)task;
     jpegd_dbg_func("exit\n");
     return ret;
@@ -969,16 +959,13 @@ MPP_RET hal_jpegd_vdpu2_wait(void *hal, HalTaskInfo *task)
     jpegd_dbg_func("enter\n");
     MPP_RET ret = MPP_OK;
     JpegdHalCtx *JpegHalCtx = (JpegdHalCtx *)hal;
-    (void)JpegHalCtx;
-    (void)task;
-
-#ifdef RKPLATFORM
     JpegRegSet *reg_out = NULL;
     RK_U32 errinfo = 1;
     MppFrame tmp = NULL;
     RK_U32 reg[184];
+    (void)task;
 
-    ret = mpp_device_wait_reg(JpegHalCtx->vpu_socket, reg,
+    ret = mpp_device_wait_reg(JpegHalCtx->dev_ctx, reg,
                               sizeof(reg) / sizeof(RK_U32));
 
     reg_out = (JpegRegSet *)reg;
@@ -1025,7 +1012,6 @@ MPP_RET hal_jpegd_vdpu2_wait(void *hal, HalTaskInfo *task)
             JpegHalCtx->output_yuv_count++;
         }
     }
-#endif
 
     jpegd_dbg_func("exit\n");
     return ret;

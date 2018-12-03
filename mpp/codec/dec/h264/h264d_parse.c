@@ -171,8 +171,8 @@ static MPP_RET parser_nalu_header(H264_SLICE_t *currSlice)
         READ_ONEBIT(p_bitctx, &currSlice->svc_extension_flag);
         if (currSlice->svc_extension_flag) {
             currSlice->mvcExt.valid = 0;
-            H264D_WARNNING("svc_extension is not supported.");
-            goto __FAILED;
+            //H264D_WARNNING("svc_extension is not supported.");
+            //goto __FAILED;
         } else { //!< MVC
             currSlice->mvcExt.valid = 1;
             p_Cur->p_Dec->mvc_valid = 1;
@@ -203,9 +203,9 @@ static MPP_RET parser_nalu_header(H264_SLICE_t *currSlice)
 __BITREAD_ERR:
     p_Cur->p_Dec->nalu_ret = ReadNaluError;
     return ret = p_bitctx->ret;
-__FAILED:
-    p_Cur->p_Dec->nalu_ret = StreamError;
-    return ret;
+//__FAILED:
+//    p_Cur->p_Dec->nalu_ret = StreamError;
+//    return ret;
 }
 
 static MPP_RET parser_one_nalu(H264_SLICE_t *currSlice)
@@ -681,10 +681,10 @@ __FAILED:
 /*!
 ***********************************************************************
 * \brief
-*    main function for parser extra header
+*    main function for parser avcC header
 ***********************************************************************
 */
-MPP_RET parse_prepare_extra_header(H264dInputCtx_t *p_Inp, H264dCurCtx_t *p_Cur)
+MPP_RET parse_prepare_avcC_header(H264dInputCtx_t *p_Inp, H264dCurCtx_t *p_Cur)
 {
     RK_S32 i = 0;
     MPP_RET ret = MPP_ERR_UNKNOW;
@@ -738,24 +738,24 @@ MPP_RET parse_prepare_extra_header(H264dInputCtx_t *p_Inp, H264dCurCtx_t *p_Cur)
     p_strm->nalu_buf = NULL;
     p_strm->startcode_found = 1;
 
-
-    return ret = MPP_OK;
+    ret = MPP_OK;
 __FAILED:
     return ret;
 }
 /*!
 ***********************************************************************
 * \brief
-*    main function for parser extra data
+*    main function for parser avcC data
 ***********************************************************************
 */
-MPP_RET parse_prepare_extra_data(H264dInputCtx_t *p_Inp, H264dCurCtx_t *p_Cur)
+MPP_RET parse_prepare_avcC_data(H264dInputCtx_t *p_Inp, H264dCurCtx_t *p_Cur)
 {
     MPP_RET ret = MPP_ERR_UNKNOW;
 
     H264dCurStream_t *p_strm = &p_Cur->strm;
     MppPacketImpl *pkt_impl  = (MppPacketImpl *)p_Inp->in_pkt;
 
+    p_strm->nalu_buf = NULL;
     p_Inp->task_valid = 0;
     if (p_Inp->pkt_eos) {
         p_Inp->task_eos = 1;
@@ -779,6 +779,16 @@ MPP_RET parse_prepare_extra_data(H264dInputCtx_t *p_Inp, H264dCurCtx_t *p_Cur)
                 p_strm->nalu_buf  = NULL;
                 goto __FAILED;
             }
+
+            p_strm->nalu_buf = p_strm->curdata + p_Inp->nal_size;
+            judge_is_new_frame(p_Cur, p_strm);
+            if (p_Cur->p_Dec->is_new_frame) {
+                p_Cur->p_Dec->have_slice_data = 0;
+                p_strm->startcode_found = 1;
+                p_strm->endcode_found = 0;
+                break;
+            }
+
             p_strm->curdata += p_Inp->nal_size;
             p_strm->nalu_offset += p_Inp->nal_size;
             pkt_impl->length -= p_Inp->nal_size;
@@ -798,6 +808,7 @@ MPP_RET parse_prepare_extra_data(H264dInputCtx_t *p_Inp, H264dCurCtx_t *p_Cur)
             p_strm->endcode_found = 0;
             p_strm->nalu_len = 0;
         }
+
         if (p_Inp->in_length < p_Inp->nal_size) {
             p_Cur->p_Dec->is_new_frame = 1;
             p_Cur->p_Dec->have_slice_data = 0;
@@ -823,7 +834,7 @@ MPP_RET parse_prepare_extra_data(H264dInputCtx_t *p_Inp, H264dCurCtx_t *p_Cur)
         p_Cur->last_dts = p_Inp->in_dts;
         p_Cur->last_pts = p_Inp->in_pts;
     }
-
+    p_strm->nalu_buf = NULL;
     ret = MPP_OK;
 __FAILED:
     //p_strm->nalu_len = 0;

@@ -31,11 +31,6 @@ if(NOT COMMAND find_host_program)
     endmacro()
 endif()
 
-set(RKPLATFORM "" CACHE BOOL "Enable RK HW CONFIG")
-if (RKPLATFORM)
-    ADD_DEFINITIONS(-DRKPLATFORM)
-endif(RKPLATFORM)
-
 project (rk_mpp)
 
 cmake_minimum_required (VERSION 2.8.8) # OBJECT libraries require 2.8.8
@@ -78,7 +73,10 @@ enable_testing()
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" SYSPROC)
 set(X86_ALIASES x86 i386 i686 x86_64 amd64)
 list(FIND X86_ALIASES "${SYSPROC}" X86MATCH)
-if("${SYSPROC}" STREQUAL "" OR X86MATCH GREATER "-1")
+if("${CMAKE_C_COMPILER}" MATCHES "-buildroot-[^/]+$")
+    message(STATUS "Detected Buildroot toolchain")
+    # Use buildroot toolchain's default architecture settings
+elseif("${SYSPROC}" STREQUAL "" OR X86MATCH GREATER "-1")
     message(STATUS "Detected x86 system processor")
     set(X86 true)
     add_definitions(-DARCH_X86=1)
@@ -91,17 +89,18 @@ elseif(${SYSPROC} STREQUAL "armv6l")
     message(STATUS "Detected ARMv6 system processor")
     set(ARM true)
     set(ARMEABI_V6 true)
-    add_definitions(-DARCH_ARM=1 -DDHAVE_ARMV6=1)
 elseif(${SYSPROC} STREQUAL "armv7-a")
     message(STATUS "Detected ARMv7 system processor")
     set(ARM true)
     set(ARMEABI_V7A true)
-    add_definitions(-DARCH_ARM=1 -DDHAVE_ARMV7=1)
 elseif(${SYSPROC} STREQUAL "armv7-a_hardfp")
     message(STATUS "Detected ARMv7 system processor")
     set(ARM true)
     set(ARMEABI_V7A_HARDFP true)
-    add_definitions(-DARCH_ARM=1 -DDHAVE_ARMV7=1)
+elseif(${SYSPROC} STREQUAL "armv8-a")
+    message(STATUS "Detected ARMv8 system processor")
+    set(ARM true)
+    set(ARMEABI_V8 true)
 else()
     message(STATUS "CMAKE_SYSTEM_PROCESSOR value `${CMAKE_SYSTEM_PROCESSOR}` is unknown")
     message(STATUS "Please add this value near ${CMAKE_CURRENT_LIST_FILE}:${CMAKE_CURRENT_LIST_LINE}")
@@ -126,25 +125,6 @@ endif()
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     set(GCC true)
 endif()
-
-if(INTEL_CXX AND WIN32)
-    # treat icl roughly like MSVC
-    set(MSVC true)
-endif()
-if(MSVC)
-    option(STATIC_LINK_CRT "Statically link C runtime for release builds" OFF)
-    if (STATIC_LINK_CRT)
-        set(CompilerFlags CMAKE_CXX_FLAGS_RELEASE CMAKE_C_FLAGS_RELEASE)
-        foreach(CompilerFlag ${CompilerFlags})
-            string(REPLACE "/MD" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
-        endforeach()
-    endif (STATIC_LINK_CRT)
-    add_definitions(/W3)  # Full warnings
-    add_definitions(/Ob2) # always inline
-    add_definitions(/MP)  # multithreaded build
-    # disable Microsofts suggestions for proprietary secure APIs
-    add_definitions(/D_CRT_SECURE_NO_WARNINGS)
-endif(MSVC)
 
 if(INTEL_CXX AND UNIX)
     # treat icpc roughly like gcc
@@ -172,6 +152,8 @@ if(GCC)
             add_definitions(-march=armv7-a -mfloat-abi=softfp -mfpu=neon)
         elseif(ARMEABI_V7A_HARDFP)
             add_definitions(-march=armv7-a -mfloat-abi=hard -mfpu=neon)
+        elseif(ARMEABI_V8)
+            add_definitions(-march=armv8-a)
         endif()
     else()
         if(X86 AND NOT X64)
@@ -198,48 +180,6 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/.svn/")
     find_host_package(Subversion)
     if(Subversion_FOUND)
         set(HAVE_SVN true)
-    else()
-        if(WIN32)
-            # The official subversion client is not available, so fall back to
-            # tortoise if it is installed.
-            find_program(TORTOISE_WCREV_EXECUTABLE
-                NAMES SubWCRev.exe
-                PATHS "[HKEY_LOCAL_MACHINE\\SOFTWARE\\TortoiseSVN;Directory]/bin"
-            )
-
-            if (NOT TORTOISE_WCREV_EXECUTABLE)
-                message(STATUS "TortoiseSVN was not found.")
-            else(NOT TORTOISE_WCREV_EXECUTABLE)
-                message(STATUS "TortoiseSVN was Found.")
-                set(HAVE_SVN true)
-
-                macro(Subversion_WC_INFO dir prefix)
-                    # the subversion commands should be executed with the C locale, otherwise
-                    # the message (which are parsed) may be translated, Alex
-                    set(_Subversion_SAVED_LC_ALL "$ENV{LC_ALL}")
-                    set(ENV{LC_ALL} C)
-
-                    execute_process(COMMAND ${TORTOISE_WCREV_EXECUTABLE} ${dir}
-                    OUTPUT_VARIABLE ${prefix}_WC_INFO
-                    ERROR_VARIABLE Subversion_svn_info_error
-                    RESULT_VARIABLE Subversion_svn_info_result
-                    OUTPUT_STRIP_TRAILING_WHITESPACE
-                    ERROR_STRIP_TRAILING_WHITESPACE)
-
-                    if(NOT ${Subversion_svn_info_result} EQUAL 0)
-                        message(SEND_ERROR "Command \"${TORTOISE_WCREV_EXECUTABLE} ${dir}\" failed with output:\n${Subversion_svn_info_error}")
-                    else()
-                        string(REGEX REPLACE "^(.*\n)?Last committed at revision ([0-9]*)\n.*"
-                        "\\2" ${prefix}_WC_REVISION "${${prefix}_WC_INFO}")
-                    endif()
-                    set(Project_WC_LAST_CHANGED_AUTHOR "unknown")
-                    set(Project_WC_LAST_CHANGED_DATE   "unknown")
-
-                    # restore the previous LC_ALL
-                    set(ENV{LC_ALL} ${_Subversion_SAVED_LC_ALL})
-                endmacro()
-            endif (NOT TORTOISE_WCREV_EXECUTABLE)
-        endif(WIN32)
     endif(Subversion_FOUND)
 endif(EXISTS "${PROJECT_SOURCE_DIR}/.svn/")
 
@@ -364,25 +304,6 @@ if(WARNINGS_AS_ERRORS)
 endif(WARNINGS_AS_ERRORS)
 
 # ----------------------------------------------------------------------------
-# Visual leak detector
-# ----------------------------------------------------------------------------
-if (WIN32)
-    find_host_package(VLD QUIET)
-    if(VLD_FOUND)
-        add_definitions(-DHAVE_VLD)
-        include_directories(${VLD_INCLUDE_DIRS})
-        set(PLATFORM_LIBS ${PLATFORM_LIBS} ${VLD_LIBRARIES})
-        link_directories(${VLD_LIBRARY_DIRS})
-    endif()
-    option(WINXP_SUPPORT "Make binaries compatible with Windows XP" OFF)
-    if(WINXP_SUPPORT)
-        # force use of workarounds for CONDITION_VARIABLE and atomic
-        # intrinsics introduced after XP
-        add_definitions(-D_WIN32_WINNT=_WIN32_WINNT_WINXP)
-    endif()
-endif()
-
-# ----------------------------------------------------------------------------
 # look for stdint.h
 # ----------------------------------------------------------------------------
 if(MSVC)
@@ -391,31 +312,6 @@ if(MSVC)
         include_directories(osal/windows)
     endif(NOT HAVE_STDINT_H)
 endif(MSVC)
-
-# ----------------------------------------------------------------------------
-# On window import win32 pthread library
-# ----------------------------------------------------------------------------
-if(MSVC)
-    set(WIN32_PTHREAD_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/osal/windows/pthread/inc")
-    include_directories(${WIN32_PTHREAD_INCLUDE_DIRS})
-    add_library(pthread SHARED IMPORTED)
-    message(STATUS "platform X86 ${X86} X64 ${X64}")
-    set(WIN32_PTHREAD_LIB_DIRS "${CMAKE_SOURCE_DIR}/osal/windows/pthread/lib")
-    set(WIN32_PTHREAD_DLL_DIRS "${CMAKE_SOURCE_DIR}/osal/windows/pthread/dll")
-    if(X64)
-        set(WIN32_ARCH "x64")
-    else()
-        set(WIN32_ARCH "x86")
-    endif()
-    include_directories("${WIN32_PTHREAD_LIB_DIRS}/${WIN32_ARCH}")
-    include_directories("${WIN32_PTHREAD_DLL_DIRS}/${WIN32_ARCH}")
-    set_target_properties(pthread PROPERTIES
-                          IMPORTED_LOCATION
-                          "${WIN32_PTHREAD_LIB_DIRS}/${WIN32_ARCH}/pthreadVC2.dll")
-    set_target_properties(pthread PROPERTIES
-                          IMPORTED_IMPLIB
-                          "${WIN32_PTHREAD_LIB_DIRS}/${WIN32_ARCH}/pthreadVC2.lib")
-endif()
 
 # ----------------------------------------------------------------------------
 # Share library option
@@ -476,7 +372,7 @@ add_subdirectory(test)
 # ----------------------------------------------------------------------------
 #  install headers
 # ----------------------------------------------------------------------------
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/inc/
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc/
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rockchip"
         FILES_MATCHING PATTERN "*.h"
         )
@@ -484,9 +380,9 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/inc/
 # ----------------------------------------------------------------------------
 #  pkgconfig
 # ----------------------------------------------------------------------------
-CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/pkgconfig/rockchip_mpp.pc.cmake"
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/pkgconfig/rockchip_mpp.pc.cmake"
                 "${CMAKE_BINARY_DIR}/rockchip_mpp.pc" @ONLY)
-CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/pkgconfig/rockchip_vpu.pc.cmake"
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/pkgconfig/rockchip_vpu.pc.cmake"
                 "${CMAKE_BINARY_DIR}/rockchip_vpu.pc" @ONLY)
 install(FILES "${CMAKE_BINARY_DIR}/rockchip_mpp.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
