@@ -42,7 +42,7 @@
 
 #define MPI_ENC_TEST_SET_IDR_FRAME  0
 #define MPI_ENC_TEST_SET_OSD            0
-#define MPI_ENC_TEST_SET_ROI            1
+#define MPI_ENC_TEST_SET_ROI            0
 
 typedef struct {
     MppCtx          ctx;
